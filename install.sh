@@ -54,28 +54,24 @@ mkdir -p "$MT_HOME/modules" "$MT_HOME/lib"
 API="https://api.github.com/repos/${REPO}/contents"
 META="${PREFIX_DIR}/tmp/.mt_meta.$$"
 
-# friendly label | file path
-STEPS="Multitool:multitool
-Common:lib/common.sh
-GitHub:modules/github.sh
-Vercel:modules/vercel.sh
-Netlify:modules/netlify.sh
-Supabase:modules/supabase.sh
-Telegram:modules/telegram.sh"
+# friendly label | file path  (parallel arrays — no stdin consumption)
+LABELS=("Multitool" "Common" "GitHub" "Vercel" "Netlify" "Supabase" "Telegram")
+FILES=("multitool" "lib/common.sh" "modules/github.sh" "modules/vercel.sh" "modules/netlify.sh" "modules/supabase.sh" "modules/telegram.sh")
 
-while IFS=: read -r label f; do
-  [ -z "$f" ] && continue
+for idx in "${!FILES[@]}"; do
+  label="${LABELS[$idx]}"
+  f="${FILES[$idx]}"
   mkdir -p "$MT_HOME/$(dirname "$f")"
   ok=0
-  # try API first (bypasses raw CDN cache)
-  if curl -fsSL -H "User-Agent: MultiTool" "${API}/${f}" -o "$META" 2>/dev/null; then
-    if python3 -c "import json,base64;d=json.load(open('$META'));open('$MT_HOME/$f','wb').write(base64.b64decode(d['content']))" 2>/dev/null; then
+  # try API first (bypasses raw CDN cache)  — </dev/null keeps stdin free
+  if curl -fsSL -H "User-Agent: MultiTool" "${API}/${f}" -o "$META" </dev/null 2>/dev/null; then
+    if python3 -c "import json,base64;d=json.load(open('$META'));open('$MT_HOME/$f','wb').write(base64.b64decode(d['content']))" </dev/null 2>/dev/null; then
       ok=1
     fi
   fi
   # fall back to raw
   if [ "$ok" -eq 0 ]; then
-    if curl -fsSL "${RAW}/${f}" -o "$MT_HOME/${f}" 2>/dev/null; then
+    if curl -fsSL "${RAW}/${f}" -o "$MT_HOME/${f}" </dev/null 2>/dev/null; then
       ok=1
     fi
   fi
@@ -84,9 +80,7 @@ while IFS=: read -r label f; do
   fi
   echo -e "${G}[✓]${N} ${label}"
   _anim "$label"
-done <<EOF
-$STEPS
-EOF
+done
 rm -f "$META"
 
 # ---- permissions ----
