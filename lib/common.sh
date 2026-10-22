@@ -25,13 +25,16 @@ MT_CONF="${HOME}/.config/multitool"
 mt_clear() { printf '\033[H\033[2J'; }
 
 mt_banner() {
-  local bfile="$MT_HOME/banner.txt"
-  [ -f "$bfile" ] || bfile="$(dirname "$0")/banner.txt"
-  printf "${CYAN}${BOLD}"
-  cat "$bfile" 2>/dev/null
-  printf "${RESET}"
-  printf "${MAGENTA}${BOLD}        >> Multi Tool — All-in-One Manager <<${RESET}\n"
-  printf "${DIM}        -------------------------------------------------${RESET}\n\n"
+  # Fixed, stable banner. No ASCII art (which breaks on zoom / narrow
+  # terminals). Uses a bordered box so it looks clean at any width.
+  printf '\n' >&2
+  printf "${CYAN}${BOLD}" >&2
+  printf '  ╔══════════════════════════════════════╗\n' >&2
+  printf '  ║          M U L T I - T O O L S        ║\n' >&2
+  printf '  ║              Dr. @cutexora            ║\n' >&2
+  printf '  ╚══════════════════════════════════════╝\n' >&2
+  printf "${RESET}" >&2
+  printf "${DIM}        -------------------------------------------------${RESET}\n\n" >&2
 }
 
 mt_line() { printf "${DIM}%s${RESET}\n" "-------------------------------------------------------"; }
