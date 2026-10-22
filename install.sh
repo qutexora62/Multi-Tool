@@ -42,11 +42,26 @@ fi
 mkdir -p "$MT_HOME/modules" "$MT_HOME/lib"
 
 # ---- download files ----
+# Use GitHub API (base64) to bypass raw CDN cache; fall back to raw.
+API="https://api.github.com/repos/${REPO}/contents"
 FILES="multitool banner.txt lib/common.sh modules/github.sh modules/vercel.sh modules/netlify.sh modules/supabase.sh modules/telegram.sh"
 
 for f in $FILES; do
   mkdir -p "$MT_HOME/$(dirname "$f")"
-  if ! curl -fsSL "${RAW}/${f}" -o "$MT_HOME/${f}"; then
+  ok=0
+  # try API first
+  if curl -fsSL -H "User-Agent: MultiTool" "${API}/${f}" -o /tmp/.mt_meta 2>/dev/null; then
+    if python3 -c "import json,base64,io;d=json.load(open('/tmp/.mt_meta'));open('$MT_HOME/$f','wb').write(base64.b64decode(d['content']))" 2>/dev/null; then
+      ok=1
+    fi
+  fi
+  # fall back to raw
+  if [ "$ok" -eq 0 ]; then
+    if curl -fsSL "${RAW}/${f}" -o "$MT_HOME/${f}" 2>/dev/null; then
+      ok=1
+    fi
+  fi
+  if [ "$ok" -eq 0 ]; then
     echo -e "${R}[✗] Failed to download: ${f}${N}"; exit 1
   fi
   echo -e "${G}[✓]${N} ${f}"
