@@ -62,14 +62,15 @@ mt_load() {
 # ============================================================
 #  mt_menu <title> <option1> <option2> ...
 #  ----------------------------------------------------------
-#  Approach: render the WHOLE menu fresh on every keypress,
-#  always starting from the SAME anchor. No cursor-up guessing,
-#  no partial repaint, no scroll interference.
+#  Glitch-free approach using the TERMINAL SCREEN buffer.
 #
-#  To keep it flicker-free we:
-#    * move to a saved anchor position (cursor save/restore)
-#    * clear from anchor to end of screen
-#    * redraw the whole block
+#  On entry we switch to the alternate screen, so the menu has
+#  its own clean canvas. Every frame we:
+#     * move cursor to home  (\033[H)
+#     * clear to end of screen (\033[J)
+#     * draw the whole block
+#  This NEVER depends on line counting -> no repeated titles,
+#  no overlap, no scroll glitches.
 #
 #  Output protocol:
 #    - all drawing  -> STDERR  (visible to user)
@@ -82,40 +83,33 @@ mt_menu() {
   local n=${#opts[@]}
   local sel=0
   local key
-  local -a lines
 
-  # hide cursor
+  # enter alternate screen + hide cursor
+  printf '\033[?1049h' >&2
   printf '\033[?25l' >&2
-  _mt_menu_restore() { printf '\033[?25h' >&2; }
+  _mt_menu_restore() {
+    printf '\033[?25h' >&2
+    printf '\033[?1049l' >&2
+  }
   trap '_mt_menu_restore' RETURN EXIT
 
-  # Build the full block as an array of printable lines
-  _mt_build() {
-    lines=()
-    lines+=("${BOLD}${WHITE}${title}${RESET}")
-    lines+=("${DIM}-------------------------------------------------------${RESET}")
+  _mt_draw() {
+    # home + clear
+    printf '\033[H\033[J' >&2
+    printf "${BOLD}${WHITE}%s${RESET}\n" "$title" >&2
+    printf "${DIM}%s${RESET}\n" "-------------------------------------------------------" >&2
     local i
     for i in "${!opts[@]}"; do
       if [ "$i" -eq "$sel" ]; then
-        lines+=("${MAGENTA}${BOLD}  ▶ ${opts[$i]}${RESET}")
+        printf "${MAGENTA}${BOLD}  ▶ %s${RESET}\n" "${opts[$i]}" >&2
       else
-        lines+=("    ${DIM}${opts[$i]}${RESET}")
+        printf "    ${DIM}%s${RESET}\n" "${opts[$i]}" >&2
       fi
     done
   }
 
-  # Print the whole block once to establish it on screen
-  _mt_build
-  local i
-  for i in "${!lines[@]}"; do
-    printf '%b\n' "${lines[$i]}" >&2
-  done
-
-  # From now on, redraw from the first line of the block each time.
-  # total lines = n + 2
-  local total=$((n + 2))
-
   while true; do
+    _mt_draw
     IFS= read -rsn1 key
     local redraw=0
     case "$key" in
@@ -124,12 +118,11 @@ mt_menu() {
         case "$rest" in
           '[A') sel=$(( (sel - 1 + n) % n )); redraw=1 ;;  # up
           '[B') sel=$(( (sel + 1) % n )); redraw=1 ;;      # down
-          '')   _mt_menu_restore; trap - RETURN EXIT; return 1 ;;
+          '')   _mt_menu_restore; trap - RETURN EXIT; return 1 ;;  # Esc
         esac
         ;;
-      ''|$'\n')
+      ''|$'\n')  # Enter
         _mt_menu_restore; trap - RETURN EXIT
-        printf '\033[%dA\033[J' "$total" >&2
         echo "$sel"
         return 0
         ;;
@@ -137,14 +130,6 @@ mt_menu() {
       j) sel=$(( (sel + 1) % n )); redraw=1 ;;
       q) _mt_menu_restore; trap - RETURN EXIT; return 1 ;;
     esac
-
-    if [ "$redraw" -eq 1 ]; then
-      # move up to the top of the block, clear it, and redraw
-      printf '\033[%dA\033[J' "$total" >&2
-      _mt_build
-      for i in "${!lines[@]}"; do
-        printf '%b\n' "${lines[$i]}" >&2
-      done
-    fi
+    # loop redraws on next iteration
   done
 }
