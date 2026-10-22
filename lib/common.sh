@@ -71,24 +71,23 @@ mt_menu() {
   local key
   local first=1
 
-  # hide cursor
-  printf '\033[?25l'
-  # trap to restore cursor on exit
-  trap 'printf "\033[?25h"' EXIT
+  # hide cursor (stderr so it's not captured)
+  printf '\033[?25l' >&2
+  trap 'printf "\033[?25h" >&2' EXIT
 
   while true; do
-    # render
+    # render — ALL to stderr, so $(...) only captures the final index
     if [ "$first" -eq 0 ]; then
-      printf '\033[%dA' "$((n + 2))" 2>/dev/null
+      printf '\033[%dA' "$((n + 2))" >&2
     fi
     first=0
-    printf "${BOLD}${WHITE}%s${RESET}\n" "$title"
-    printf "${DIM}%s${RESET}\n" "-------------------------------------------------------"
+    printf "${BOLD}${WHITE}%s${RESET}\n" "$title" >&2
+    printf "${DIM}%s${RESET}\n" "-------------------------------------------------------" >&2
     for i in "${!opts[@]}"; do
       if [ "$i" -eq "$sel" ]; then
-        printf "${MAGENTA}${BOLD}  ▶ %s${RESET}\n" "${opts[$i]}"
+        printf "${MAGENTA}${BOLD}  ▶ %s${RESET}\n" "${opts[$i]}" >&2
       else
-        printf "    ${DIM}%s${RESET}\n" "${opts[$i]}"
+        printf "    ${DIM}%s${RESET}\n" "${opts[$i]}" >&2
       fi
     done
 
@@ -96,24 +95,23 @@ mt_menu() {
     IFS= read -rsn1 key
     case "$key" in
       $'\x1b')
-        # could be escape sequence
         IFS= read -rsn2 -t 0.05 rest
         case "$rest" in
           '[A') sel=$(( (sel - 1 + n) % n )) ;;   # up
           '[B') sel=$(( (sel + 1) % n )) ;;       # down
-          '')   printf '\033[?25h'; trap - EXIT; return 1 ;;  # Esc
+          '')   printf '\033[?25h' >&2; trap - EXIT; return 1 ;;  # Esc
         esac
         ;;
       ''|$'\n') # Enter
-        printf '\033[?25h'; trap - EXIT
-        printf '\033[%dA' "$((n + 2))" 2>/dev/null
-        printf '\033[J' 2>/dev/null
-        echo "$sel"
+        printf '\033[?25h' >&2; trap - EXIT
+        printf '\033[%dA' "$((n + 2))" >&2
+        printf '\033[J' >&2
+        echo "$sel"   # <-- ONLY this goes to stdout (captured)
         return 0
         ;;
       k) sel=$(( (sel - 1 + n) % n )) ;;
       j) sel=$(( (sel + 1) % n )) ;;
-      q) printf '\033[?25h'; trap - EXIT; return 1 ;;
+      q) printf '\033[?25h' >&2; trap - EXIT; return 1 ;;
     esac
   done
 }
