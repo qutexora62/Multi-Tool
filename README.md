@@ -28,5 +28,5 @@ multitool
 ## Uninstall
 
 ```bash
-rm -rf "$PREFIX/lib/multitool" "$PREFIX/bin/multitool"
+curl -sL https://raw.githubusercontent.com/qutexora62/Multi-Tool/main/uninstall.sh | bash
 ```
