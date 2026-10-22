@@ -1,0 +1,48 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# ============================================================
+#  Multi Tool — main launcher
+#  GitHub · Vercel · Netlify · Supabase · Telegram
+# ============================================================
+
+# Resolve own directory (works when run from anywhere)
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Locate installed home, fallback to source dir
+MT_HOME="${PREFIX:-/data/data/com.termux/files/usr}/lib/multitool"
+[ -d "$MT_HOME" ] || MT_HOME="$SELF_DIR"
+
+# shellcheck disable=SC1090
+source "$MT_HOME/lib/common.sh"
+
+# ---------------- menu ----------------
+show_menu() {
+  mt_clear
+  mt_banner
+  printf "  ${WHITE}${BOLD}Select a service:${RESET}\n\n"
+  printf "   ${GREEN}1)${RESET} ${BOLD}GitHub${RESET}\n"
+  printf "   ${GREEN}2)${RESET} ${BOLD}Vercel${RESET}\n"
+  printf "   ${GREEN}3)${RESET} ${BOLD}Netlify${RESET}\n"
+  printf "   ${GREEN}4)${RESET} ${BOLD}Supabase${RESET}\n"
+  printf "   ${GREEN}5)${RESET} ${BOLD}Telegram${RESET}\n"
+  printf "   ${RED}0)${RESET} ${BOLD}Exit${RESET}\n\n"
+  mt_line
+  printf "  ${CYAN}Enter choice:${RESET} "
+}
+
+main_loop() {
+  while true; do
+    show_menu
+    read -r choice
+    case "$choice" in
+      1) mt_load github   ;;
+      2) mt_load vercel   ;;
+      3) mt_load netlify  ;;
+      4) mt_load supabase ;;
+      5) mt_load telegram ;;
+      0|q|Q|exit) mt_clear; mt_info "Bye! 👋"; exit 0 ;;
+      *) mt_warn "Invalid choice — try again."; sleep 1 ;;
+    esac
+  done
+}
+
+main_loop
