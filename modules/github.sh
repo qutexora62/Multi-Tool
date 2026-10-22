@@ -270,9 +270,7 @@ github_main() {
 
     local -a items=()
     if [ -n "$token" ]; then
-      # logged in → full menu
-      items+=("${GREEN}Authentication (OAuth)${RESET}")
-      items+=("${GREEN}Personal Access Token${RESET}")
+      # logged in → repo actions only (no Auth/PAT)
       items+=("${CYAN}List My Repositories${RESET}")
       items+=("${CYAN}Create Repository${RESET}")
       items+=("${CYAN}Clone Repository${RESET}")
@@ -290,14 +288,12 @@ github_main() {
 
     if [ -n "$token" ]; then
       case "$choice" in
-        0) gh_oauth ;;
-        1) gh_pat ;;
-        2) gh_list_repos ;;
-        3) gh_create_repo ;;
-        4) gh_git_clone ;;
-        5) gh_delete_repo ;;
-        6) gh_logout ;;
-        7) return ;;
+        0) gh_list_repos ;;
+        1) gh_create_repo ;;
+        2) gh_git_clone ;;
+        3) gh_delete_repo ;;
+        4) gh_logout ;;
+        5) return ;;
       esac
     else
       case "$choice" in
