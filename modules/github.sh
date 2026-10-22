@@ -49,6 +49,17 @@ gh_verify() {
   return 1
 }
 
+# ---------- login guard ----------
+gh_require_login() {
+  local token; token=$(gh_get_token)
+  if [ -z "$token" ]; then
+    mt_warn "You must login first (Authentication or Personal Access Token)."
+    mt_pause
+    return 1
+  fi
+  return 0
+}
+
 # ============================================================
 #  OAuth Device Flow
 # ============================================================
@@ -65,10 +76,11 @@ gh_oauth() {
     -d "client_id=${GH_CLIENT_ID}&scope=repo,user,delete_repo,workflow,admin:org,admin:public_key,gist" \
     "https://github.com/login/device/code")
 
-  local device_code user_code verify_uri interval
+  local device_code user_code verify_uri verify_full interval
   device_code=$(printf '%s' "$resp" | python -c "import sys,json; print(json.load(sys.stdin).get('device_code',''))" 2>/dev/null)
   user_code=$(printf '%s' "$resp" | python -c "import sys,json; print(json.load(sys.stdin).get('user_code',''))" 2>/dev/null)
   verify_uri=$(printf '%s' "$resp" | python -c "import sys,json; print(json.load(sys.stdin).get('verification_uri',''))" 2>/dev/null)
+  verify_full=$(printf '%s' "$resp" | python -c "import sys,json; print(json.load(sys.stdin).get('verification_uri_complete',''))" 2>/dev/null)
   interval=$(printf '%s' "$resp" | python -c "import sys,json; print(json.load(sys.stdin).get('interval',5))" 2>/dev/null)
 
   if [ -z "$device_code" ]; then
@@ -80,7 +92,12 @@ gh_oauth() {
   echo ""
   printf "  ${GREEN}${BOLD}Your code:${RESET}  ${YELLOW}${BOLD}%s${RESET}\n\n" "$user_code"
   mt_info "Opening browser + showing URL..."
-  gh_open_url "$verify_uri"
+  # Prefer the complete URL (auto-fills the code) when available
+  if [ -n "$verify_full" ]; then
+    gh_open_url "$verify_full"
+  else
+    gh_open_url "$verify_uri"
+  fi
 
   printf "  ${DIM}Waiting for authorization...${RESET}\n"
   local token=""
@@ -123,7 +140,7 @@ gh_oauth() {
 # ============================================================
 gh_pat() {
   mt_clear; mt_banner
-  printf "  ${BOLD}${WHITE}GitHub — Personal Access Token${RESET} ${GREEN}(Recommended)${RESET}\n"
+  printf "  ${BOLD}${WHITE}GitHub — Personal Access Token${RESET} ${GREEN}${BOLD}(Recommended)${RESET}\n"
   mt_line
   mt_info "Opening the token creation page..."
   gh_open_url "https://github.com/settings/tokens/new?scopes=repo,user,delete_repo,workflow,admin:org,admin:public_key,gist&description=MultiTool"
@@ -163,6 +180,7 @@ gh_api() {
 gh_jq() { python -c "import sys,json; d=json.load(sys.stdin); print($1)" 2>/dev/null; }
 
 gh_list_repos() {
+  gh_require_login || return
   mt_clear; mt_banner
   printf "  ${BOLD}${WHITE}GitHub — My Repositories${RESET}\n"; mt_line
   local resp
@@ -183,6 +201,7 @@ except Exception as e:
 }
 
 gh_create_repo() {
+  gh_require_login || return
   mt_clear; mt_banner
   printf "  ${BOLD}${WHITE}GitHub — Create Repository${RESET}\n"; mt_line
   printf "  Repo name: "; read -r name
@@ -198,6 +217,7 @@ gh_create_repo() {
 }
 
 gh_delete_repo() {
+  gh_require_login || return
   mt_clear; mt_banner
   printf "  ${BOLD}${WHITE}GitHub — Delete Repository${RESET}\n"; mt_line
   printf "  Repo (owner/name): "; read -r repo
@@ -207,6 +227,21 @@ gh_delete_repo() {
   local resp
   resp=$(gh_api DELETE "/repos/$repo" "")
   if [ -z "$resp" ]; then mt_ok "Deleted: $repo"; else mt_err "Failed: $(printf '%s' "$resp" | gh_jq "d.get('message','')")"; fi
+  mt_pause
+}
+
+# ============================================================
+#  Git operations: clone, push, commit, pull
+# ============================================================
+gh_git_clone() {
+  gh_require_login || return
+  mt_clear; mt_banner
+  printf "  ${BOLD}${WHITE}GitHub — Clone Repository${RESET}\n"; mt_line
+  printf "  Repo (owner/name): "; read -r repo
+  [ -z "$repo" ] && { mt_err "Cancelled."; mt_pause; return; }
+  local token; token=$(gh_get_token)
+  printf "  ${DIM}Cloning...${RESET}\n"
+  git clone "https://${token}@github.com/${repo}.git" && mt_ok "Cloned: $repo" || mt_err "Clone failed."
   mt_pause
 }
 
@@ -228,29 +263,45 @@ github_main() {
       login=$(gh_verify "$token")
       status="${GREEN}● Logged in${RESET} ${DIM}(${login:-unknown})${RESET}"
     else
-      status="${RED}● Not logged in${RESET}"
+      status="${RED}● Not logged in${RESET} ${DIM}— please authenticate first${RESET}"
     fi
     printf "  ${BOLD}${WHITE}GitHub${RESET}   %b\n" "$status"
     mt_line
 
+    # Build menu. Actions are shown only when logged in.
+    local -a items=()
+    if [ -n "$token" ]; then
+      items+=("${GREEN}Authentication (OAuth)${RESET}")
+      items+=("${GREEN}Personal Access Token${RESET} ${GREEN}${BOLD}(Recommended)${RESET}")
+      items+=("${CYAN}List My Repositories${RESET}")
+      items+=("${CYAN}Create Repository${RESET}")
+      items+=("${CYAN}Clone Repository${RESET}")
+      items+=("${RED}Delete Repository${RESET}")
+      items+=("Logout")
+      items+=("Back")
+    else
+      items+=("${GREEN}Authentication (OAuth)${RESET}")
+      items+=("${GREEN}Personal Access Token${RESET} ${GREEN}${BOLD}(Recommended)${RESET}")
+      items+=("${DIM}List My Repositories  (login required)${RESET}")
+      items+=("${DIM}Create Repository  (login required)${RESET}")
+      items+=("${DIM}Clone Repository  (login required)${RESET}")
+      items+=("${DIM}Delete Repository  (login required)${RESET}")
+      items+=("${DIM}Logout${RESET}")
+      items+=("Back")
+    fi
+
     local choice
-    choice=$(mt_menu "GitHub — choose action:" \
-      "Authentication (OAuth)" \
-      "Personal Access Token (Recommended)" \
-      "List My Repositories" \
-      "Create Repository" \
-      "Delete Repository" \
-      "Logout" \
-      "Back") || return
+    choice=$(mt_menu "GitHub — choose action:" "${items[@]}") || return
 
     case "$choice" in
       0) gh_oauth ;;
       1) gh_pat ;;
       2) gh_list_repos ;;
       3) gh_create_repo ;;
-      4) gh_delete_repo ;;
-      5) gh_logout ;;
-      6) return ;;
+      4) gh_git_clone ;;
+      5) gh_delete_repo ;;
+      6) gh_logout ;;
+      7) return ;;
     esac
   done
 }
