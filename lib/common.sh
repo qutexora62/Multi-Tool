@@ -1,9 +1,10 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # ============================================================
-#  Multi Tool — common library (colors + helpers + arrow menu)
+#  Multi Tool — common library
+#  colors + helpers + glitch-free arrow-key menu
 # ============================================================
 
-# Colors
+# ---------- colors ----------
 RESET='\033[0m'
 BOLD='\033[1m'
 DIM='\033[2m'
@@ -15,13 +16,13 @@ MAGENTA='\033[1;35m'
 CYAN='\033[1;36m'
 WHITE='\033[1;37m'
 
-# Tool paths
+# ---------- paths ----------
 MT_HOME="${PREFIX:-/data/data/com.termux/files/usr}/lib/multitool"
 MT_BIN="${PREFIX:-/data/data/com.termux/files/usr}/bin/multitool"
 MT_CONF="${HOME}/.config/multitool"
 
-# ---------- helpers ----------
-mt_clear() { printf '\033[H\033[2J\033[3J'; }
+# ---------- basic helpers ----------
+mt_clear() { printf '\033[H\033[2J'; }
 
 mt_banner() {
   local bfile="$MT_HOME/banner.txt"
@@ -45,7 +46,7 @@ mt_pause() {
   read -r _
 }
 
-# Load a module safely
+# ---------- module loader ----------
 mt_load() {
   local mod="$MT_HOME/modules/$1.sh"
   [ -f "$mod" ] || mod="$(dirname "$0")/modules/$1.sh"
@@ -58,66 +59,92 @@ mt_load() {
   fi
 }
 
-# ------------------------------------------------------------
+# ============================================================
 #  mt_menu <title> <option1> <option2> ...
-#  Arrow-key (↑/↓) + Enter selection. Echoes chosen index (0-based).
+#  ----------------------------------------------------------
+#  Approach: render the WHOLE menu fresh on every keypress,
+#  always starting from the SAME anchor. No cursor-up guessing,
+#  no partial repaint, no scroll interference.
+#
+#  To keep it flicker-free we:
+#    * move to a saved anchor position (cursor save/restore)
+#    * clear from anchor to end of screen
+#    * redraw the whole block
+#
+#  Output protocol:
+#    - all drawing  -> STDERR  (visible to user)
+#    - selected idx -> STDOUT  (captured by caller via $(...))
 #  Returns 1 if cancelled (q / Esc).
-#  Glitch-free: redraws whole block from a saved cursor anchor.
-# ------------------------------------------------------------
+# ============================================================
 mt_menu() {
   local title="$1"; shift
   local -a opts=("$@")
   local n=${#opts[@]}
   local sel=0
   local key
-  local first=1
+  local -a lines
 
-  # hide cursor (stderr so it's not captured)
+  # hide cursor
   printf '\033[?25l' >&2
-  trap 'printf "\033[?25h" >&2' EXIT
+  _mt_menu_restore() { printf '\033[?25h' >&2; }
+  trap '_mt_menu_restore' RETURN EXIT
 
-  while true; do
-    # Build the whole block in one buffer (no flicker)
-    local buf=""
-    buf+="${BOLD}${WHITE}${title}${RESET}\n"
-    buf+="${DIM}-------------------------------------------------------${RESET}\n"
+  # Build the full block as an array of printable lines
+  _mt_build() {
+    lines=()
+    lines+=("${BOLD}${WHITE}${title}${RESET}")
+    lines+=("${DIM}-------------------------------------------------------${RESET}")
     local i
     for i in "${!opts[@]}"; do
       if [ "$i" -eq "$sel" ]; then
-        buf+="${MAGENTA}${BOLD}  ▶ ${opts[$i]}${RESET}\n"
+        lines+=("${MAGENTA}${BOLD}  ▶ ${opts[$i]}${RESET}")
       else
-        buf+="    ${DIM}${opts[$i]}${RESET}\n"
+        lines+=("    ${DIM}${opts[$i]}${RESET}")
       fi
     done
+  }
 
-    if [ "$first" -eq 0 ]; then
-      # move cursor back up to the top of the block, then redraw
-      printf '\033[%dA' "$((n + 2))" >&2
-    fi
-    first=0
-    printf '%b' "$buf" >&2
+  # Print the whole block once to establish it on screen
+  _mt_build
+  local i
+  for i in "${!lines[@]}"; do
+    printf '%b\n' "${lines[$i]}" >&2
+  done
 
-    # read one key
+  # From now on, redraw from the first line of the block each time.
+  # total lines = n + 2
+  local total=$((n + 2))
+
+  while true; do
     IFS= read -rsn1 key
+    local redraw=0
     case "$key" in
       $'\x1b')
         IFS= read -rsn2 -t 0.05 rest
         case "$rest" in
-          '[A') sel=$(( (sel - 1 + n) % n )) ;;   # up
-          '[B') sel=$(( (sel + 1) % n )) ;;       # down
-          '')   printf '\033[?25h' >&2; trap - EXIT; return 1 ;;  # Esc
+          '[A') sel=$(( (sel - 1 + n) % n )); redraw=1 ;;  # up
+          '[B') sel=$(( (sel + 1) % n )); redraw=1 ;;      # down
+          '')   _mt_menu_restore; trap - RETURN EXIT; return 1 ;;
         esac
         ;;
-      ''|$'\n') # Enter
-        printf '\033[?25h' >&2; trap - EXIT
-        # clear the menu block from screen
-        printf '\033[%dA\033[J' "$((n + 2))" >&2
-        echo "$sel"   # <-- ONLY this goes to stdout (captured)
+      ''|$'\n')
+        _mt_menu_restore; trap - RETURN EXIT
+        printf '\033[%dA\033[J' "$total" >&2
+        echo "$sel"
         return 0
         ;;
-      k) sel=$(( (sel - 1 + n) % n )) ;;
-      j) sel=$(( (sel + 1) % n )) ;;
-      q) printf '\033[?25h' >&2; trap - EXIT; return 1 ;;
+      k) sel=$(( (sel - 1 + n) % n )); redraw=1 ;;
+      j) sel=$(( (sel + 1) % n )); redraw=1 ;;
+      q) _mt_menu_restore; trap - RETURN EXIT; return 1 ;;
     esac
+
+    if [ "$redraw" -eq 1 ]; then
+      # move up to the top of the block, clear it, and redraw
+      printf '\033[%dA\033[J' "$total" >&2
+      _mt_build
+      for i in "${!lines[@]}"; do
+        printf '%b\n' "${lines[$i]}" >&2
+      done
+    fi
   done
 }
