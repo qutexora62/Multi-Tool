@@ -35,7 +35,10 @@ command -v curl >/dev/null 2>&1 || { echo -e "${Y}[i] Installing curl...${N}"; p
 echo -e "${C}[i]${N} Installing to: ${MT_HOME}"
 
 # ---- clean old install ----
-rm -rf "$MT_HOME"
+if [ -d "$MT_HOME" ]; then
+  chmod -R 755 "$MT_HOME" 2>/dev/null || true
+  rm -rf "$MT_HOME"
+fi
 mkdir -p "$MT_HOME/modules" "$MT_HOME/lib"
 
 # ---- download files ----
