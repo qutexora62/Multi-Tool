@@ -187,16 +187,10 @@ gh_list_repos() {
 
   local resp
   resp=$(gh_api GET "/user/repos?per_page=100&sort=updated")
-  # build parallel arrays: names[] and labels[] (name + visibility)
-  local -a names=() labels=()
-  while IFS=$'\t' read -r nm vis; do
+  local -a names=()
+  while IFS= read -r nm; do
     [ -z "$nm" ] && continue
     names+=("$nm")
-    if [ "$vis" = "true" ]; then
-      labels+=("${nm}  ${RED}🔒 Private${RESET}")
-    else
-      labels+=("${nm}  ${GREEN}🌐 Public${RESET}")
-    fi
   done < <(printf '%s' "$resp" | python -c "
 import sys,json
 try:
@@ -204,7 +198,7 @@ try:
     if isinstance(d,dict):
         sys.exit()
     for r in d:
-        print(r['full_name']+'\t'+('true' if r.get('private') else 'false'))
+        print(r['full_name'])
 except Exception:
     pass
 ")
@@ -214,8 +208,11 @@ except Exception:
     mt_pause; return
   fi
 
-  # interactive browser
   local sel=0 n=${#names[@]} key
+  local del_armed=-1          # index armed for delete (red)
+  local renaming=0            # 1 while editing a name inline
+  local edit_buf=""           # rename input buffer
+
   printf '\033[?25l' >&2
   _gh_repo_restore() { printf '\033[?25h' >&2; }
   trap '_gh_repo_restore' RETURN EXIT
@@ -225,73 +222,102 @@ except Exception:
     printf "  ${BOLD}${WHITE}GitHub — List Repository${RESET}   ${DIM}(%d repos)${RESET}\n" "$n" >&2
     mt_line >&2
     local i
-    for i in "${!labels[@]}"; do
-      if [ "$i" -eq "$sel" ]; then
-        printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}%b${RESET}\n" "${labels[$i]}" >&2
+    for i in "${!names[@]}"; do
+      if [ "$renaming" -eq 1 ] && [ "$i" -eq "$sel" ]; then
+        # inline editable input
+        printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}${WHITE}[ %s${RESET}${DIM}_${RESET}${BOLD} ]${RESET}\n" "$edit_buf" >&2
+      elif [ "$i" -eq "$del_armed" ]; then
+        # armed for delete → red
+        printf "  ${MAGENTA}${BOLD}▶${RESET} ${RED}${BOLD}%s${RESET}  ${RED}(Ctrl+D again to delete)${RESET}\n" "${names[$i]}" >&2
+      elif [ "$i" -eq "$sel" ]; then
+        printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}%s${RESET}\n" "${names[$i]}" >&2
       else
-        printf "    %b\n" "${labels[$i]}" >&2
+        printf "    %s\n" "${names[$i]}" >&2
       fi
     done
-    printf "\n  ${DIM}↑/↓ move   Ctrl+R rename   Ctrl+D (x2) delete   q/Esc back${RESET}\n" >&2
+    if [ "$renaming" -eq 1 ]; then
+      printf "\n  ${DIM}type new name · Enter = save · Esc = cancel${RESET}\n" >&2
+    else
+      printf "\n  ${DIM}↑/↓ move   Ctrl+R rename   Ctrl+D (x2) delete   q/Esc back${RESET}\n" >&2
+    fi
   }
 
   while true; do
     _gh_repo_draw
+
+    if [ "$renaming" -eq 1 ]; then
+      # ---- inline rename input mode ----
+      IFS= read -rsn1 key
+      case "$key" in
+        ''|$'\n')  # Enter → save
+          renaming=0
+          if [ -n "$edit_buf" ] && [ "$edit_buf" != "${names[$sel]}" ]; then
+            local repo="${names[$sel]}"
+            local resp2
+            resp2=$(gh_api PATCH "/repos/$repo" "{\"name\":\"$edit_buf\"}")
+            local newfull; newfull=$(printf '%s' "$resp2" | gh_jq "d.get('full_name','')")
+            if [ -n "$newfull" ]; then
+              names[$sel]="$newfull"
+            fi
+          fi
+          ;;
+        $'\x1b')  # Esc → cancel (handle possible arrow seq)
+          IFS= read -rsn2 -t 0.05 rest
+          renaming=0
+          ;;
+        $'\x7f'|$'\b')  # backspace
+          edit_buf="${edit_buf%?}"
+          ;;
+        *) edit_buf+="$key" ;;
+      esac
+      continue
+    fi
+
+    # ---- normal navigation mode ----
     IFS= read -rsn1 key
     case "$key" in
       $'\x1b')
         IFS= read -rsn2 -t 0.05 rest
         case "$rest" in
-          '[A') sel=$(( (sel - 1 + n) % n )) ;;
-          '[B') sel=$(( (sel + 1) % n )) ;;
+          '[A') sel=$(( (sel - 1 + n) % n )); del_armed=-1 ;;
+          '[B') sel=$(( (sel + 1) % n )); del_armed=-1 ;;
           '')   _gh_repo_restore; trap - RETURN EXIT; return ;;
         esac
         ;;
-      $'\x12')  # Ctrl+R → rename
-        _gh_repo_restore; trap - RETURN EXIT
-        gh_rename_repo "${names[$sel]}"
-        return
+      $'\x12')  # Ctrl+R → start inline rename
+        renaming=1
+        edit_buf="${names[$sel]}"
+        del_armed=-1
         ;;
-      $'\x04')  # Ctrl+D → delete (press twice)
-        _gh_repo_restore; trap - RETURN EXIT
-        gh_delete_repo_confirm "${names[$sel]}"
-        return
+      $'\x04')  # Ctrl+D → arm (red); second Ctrl+D deletes
+        if [ "$del_armed" -eq "$sel" ]; then
+          local repo="${names[$sel]}"
+          local resp3
+          resp3=$(gh_api DELETE "/repos/$repo" "")
+          if [ -z "$resp3" ]; then
+            # remove from list
+            local -a tmp=()
+            local i
+            for i in "${!names[@]}"; do
+              [ "$i" -ne "$sel" ] && tmp+=("${names[$i]}")
+            done
+            names=("${tmp[@]}")
+            n=${#names[@]}
+            del_armed=-1
+            [ "$n" -eq 0 ] && { _gh_repo_restore; trap - RETURN EXIT; return; }
+            [ "$sel" -ge "$n" ] && sel=$(( n - 1 ))
+          else
+            del_armed=-1
+          fi
+        else
+          del_armed=$sel
+        fi
         ;;
-      k) sel=$(( (sel - 1 + n) % n )) ;;
-      j) sel=$(( (sel + 1) % n )) ;;
+      k) sel=$(( (sel - 1 + n) % n )); del_armed=-1 ;;
+      j) sel=$(( (sel + 1) % n )); del_armed=-1 ;;
       q) _gh_repo_restore; trap - RETURN EXIT; return ;;
     esac
   done
-}
-
-# ---------- rename a repo ----------
-gh_rename_repo() {
-  local repo="$1"
-  mt_clear; mt_banner
-  printf "  ${BOLD}${WHITE}GitHub — Rename Repository${RESET}\n"; mt_line
-  printf "  Repo: ${CYAN}%s${RESET}\n" "$repo"
-  printf "  New name: "; read -r newname
-  [ -z "$newname" ] && { mt_warn "Cancelled."; mt_pause; return; }
-  local resp
-  resp=$(gh_api PATCH "/repos/$repo" "{\"name\":\"$newname\"}")
-  local url; url=$(printf '%s' "$resp" | gh_jq "d.get('full_name','')")
-  if [ -n "$url" ]; then mt_ok "Renamed → $url"; else mt_err "Failed: $(printf '%s' "$resp" | gh_jq "d.get('message','')")"; fi
-  mt_pause
-}
-
-# ---------- delete a repo (must press Ctrl+D twice) ----------
-gh_delete_repo_confirm() {
-  local repo="$1"
-  mt_clear; mt_banner
-  printf "  ${BOLD}${WHITE}GitHub — Delete Repository${RESET}\n"; mt_line
-  printf "  ${RED}Press Ctrl+D again to confirm delete of:${RESET} ${BOLD}%s${RESET}\n" "$repo"
-  printf "  ${DIM}(any other key cancels)${RESET}\n"
-  local k; IFS= read -rsn1 k
-  if [ "$k" != $'\x04' ]; then mt_warn "Cancelled."; mt_pause; return; fi
-  local resp
-  resp=$(gh_api DELETE "/repos/$repo" "")
-  if [ -z "$resp" ]; then mt_ok "Deleted: $repo"; else mt_err "Failed: $(printf '%s' "$resp" | gh_jq "d.get('message','')")"; fi
-  mt_pause
 }
 
 gh_create_repo() {
@@ -325,6 +351,50 @@ gh_git_clone() {
   mt_pause
 }
 
+# ---------- push a local folder to a repo ----------
+gh_git_push() {
+  gh_require_login || return
+  mt_clear; mt_banner
+  printf "  ${BOLD}${WHITE}GitHub — Push Repository${RESET}\n"; mt_line
+
+  printf "  Local folder path: "; read -r dir
+  [ -z "$dir" ] && { mt_err "Cancelled."; mt_pause; return; }
+  [ -d "$dir" ] || { mt_err "Folder not found: $dir"; mt_pause; return; }
+
+  printf "  Repo (owner/name): "; read -r repo
+  [ -z "$repo" ] && { mt_err "Cancelled."; mt_pause; return; }
+
+  printf "  Branch (default main): "; read -r branch
+  [ -z "$branch" ] && branch="main"
+
+  printf "  Commit message (default 'update'): "; read -r msg
+  [ -z "$msg" ] && msg="update"
+
+  local token; token=$(gh_get_token)
+  local remote="https://${token}@github.com/${repo}.git"
+
+  ( cd "$dir" || exit 1
+    git init -q 2>/dev/null
+    git add -A
+    git -c user.name="MultiTool" -c user.email="multitool@local" commit -q -m "$msg" 2>/dev/null
+    git branch -M "$branch" 2>/dev/null
+    # set or update remote
+    if git remote get-url origin >/dev/null 2>&1; then
+      git remote set-url origin "$remote"
+    else
+      git remote add origin "$remote"
+    fi
+    printf "  ${DIM}Pushing to %s (%s)...${RESET}\n" "$repo" "$branch"
+    git push -u origin "$branch" 2>&1 | tail -3
+  )
+  if [ "${PIPESTATUS[0]}" -eq 0 ]; then
+    mt_ok "Pushed: $repo ($branch)"
+  else
+    mt_err "Push failed."
+  fi
+  mt_pause
+}
+
 gh_logout() {
   gh_clear_token
   mt_ok "Logged out — token removed."
@@ -354,6 +424,7 @@ github_main() {
       items+=("${CYAN}List Repository${RESET}")
       items+=("${CYAN}Create Repository${RESET}")
       items+=("${CYAN}Clone Repository${RESET}")
+      items+=("${CYAN}Push Repository${RESET}")
       items+=("LogOut")
       items+=("Back")
     else
@@ -370,8 +441,9 @@ github_main() {
         0) gh_list_repos ;;
         1) gh_create_repo ;;
         2) gh_git_clone ;;
-        3) gh_logout ;;
-        4) return ;;
+        3) gh_git_push ;;
+        4) gh_logout ;;
+        5) return ;;
       esac
     else
       case "$choice" in
