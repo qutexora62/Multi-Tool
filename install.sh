@@ -44,14 +44,15 @@ mkdir -p "$MT_HOME/modules" "$MT_HOME/lib"
 # ---- download files ----
 # Use GitHub API (base64) to bypass raw CDN cache; fall back to raw.
 API="https://api.github.com/repos/${REPO}/contents"
+META="${PREFIX_DIR}/tmp/.mt_meta.$$"
 FILES="multitool banner.txt lib/common.sh modules/github.sh modules/vercel.sh modules/netlify.sh modules/supabase.sh modules/telegram.sh"
 
 for f in $FILES; do
   mkdir -p "$MT_HOME/$(dirname "$f")"
   ok=0
-  # try API first
-  if curl -fsSL -H "User-Agent: MultiTool" "${API}/${f}" -o /tmp/.mt_meta 2>/dev/null; then
-    if python3 -c "import json,base64,io;d=json.load(open('/tmp/.mt_meta'));open('$MT_HOME/$f','wb').write(base64.b64decode(d['content']))" 2>/dev/null; then
+  # try API first (bypasses raw CDN cache)
+  if curl -fsSL -H "User-Agent: MultiTool" "${API}/${f}" -o "$META" 2>/dev/null; then
+    if python3 -c "import json,base64;d=json.load(open('$META'));open('$MT_HOME/$f','wb').write(base64.b64decode(d['content']))" 2>/dev/null; then
       ok=1
     fi
   fi
@@ -66,6 +67,7 @@ for f in $FILES; do
   fi
   echo -e "${G}[✓]${N} ${f}"
 done
+rm -f "$META"
 
 # ---- permissions ----
 chmod 755 "$MT_HOME/multitool"
