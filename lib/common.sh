@@ -43,8 +43,8 @@ mt_line() { printf "${DIM}%s${RESET}\n" "---------------------------------------
 #  LOGIN GATE
 #  ----------------------------------------------------------
 #  Valid credentials (change here if needed):
-MT_VALID_USER="cutexora"
-MT_VALID_KEY="@cutexora"
+MT_VALID_USER="Aarav"
+MT_VALID_KEY="cutexora62"
 #  Auth file is obfuscated (XOR + base64) so it is NOT plain
 #  readable and cannot be opened with a simple `cat`.
 MT_AUTH="${MT_CONF}/.auth"
@@ -100,7 +100,7 @@ mt_login() {
   printf "  ${CYAN}│${RESET}  ${BOLD}Access Key${RESET}                          ${CYAN}│${RESET}\n" >&2
   printf "  ${CYAN}└──────────────────────────────────────┘${RESET}\n" >&2
   printf "   ${BOLD}> ${RESET}"
-  read -rs key
+  read -r key
   printf "\n\n"
 
   if [ "$user" = "$MT_VALID_USER" ] && [ "$key" = "$MT_VALID_KEY" ]; then
