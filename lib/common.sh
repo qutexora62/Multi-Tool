@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # ============================================================
-#  Multi Tool — common library (colors + helpers)
+#  Multi Tool — common library (colors + helpers + arrow menu)
 # ============================================================
 
 # Colors
@@ -18,6 +18,7 @@ WHITE='\033[1;37m'
 # Tool paths
 MT_HOME="${PREFIX:-/data/data/com.termux/files/usr}/lib/multitool"
 MT_BIN="${PREFIX:-/data/data/com.termux/files/usr}/bin/multitool"
+MT_CONF="${HOME}/.config/multitool"
 
 # ---------- helpers ----------
 mt_clear() { clear 2>/dev/null || printf '\033[2J\033[H'; }
@@ -55,4 +56,60 @@ mt_load() {
     mt_err "Module not found: $1"
     return 1
   fi
+}
+
+# ------------------------------------------------------------
+#  mt_menu <title> <option1> <option2> ...
+#  Arrow-key (↑/↓) + Enter selection. Echoes chosen index (0-based).
+#  Returns 1 if cancelled (q / Esc).
+# ------------------------------------------------------------
+mt_menu() {
+  local title="$1"; shift
+  local -a opts=("$@")
+  local n=${#opts[@]}
+  local sel=0
+  local key
+
+  # hide cursor
+  printf '\033[?25l'
+  # trap to restore cursor on exit
+  trap 'printf "\033[?25h"' EXIT
+
+  while true; do
+    # render
+    printf '\033[%dA' "$((n + 2))" 2>/dev/null
+    printf "${BOLD}${WHITE}%s${RESET}\n" "$title"
+    printf "${DIM}%s${RESET}\n" "-------------------------------------------------------"
+    for i in "${!opts[@]}"; do
+      if [ "$i" -eq "$sel" ]; then
+        printf "${MAGENTA}${BOLD}  ▶ %s${RESET}\n" "${opts[$i]}"
+      else
+        printf "    ${DIM}%s${RESET}\n" "${opts[$i]}"
+      fi
+    done
+
+    # read one key
+    IFS= read -rsn1 key
+    case "$key" in
+      $'\x1b')
+        # could be escape sequence
+        IFS= read -rsn2 -t 0.05 rest
+        case "$rest" in
+          '[A') sel=$(( (sel - 1 + n) % n )) ;;   # up
+          '[B') sel=$(( (sel + 1) % n )) ;;       # down
+          '')   printf '\033[?25h'; trap - EXIT; return 1 ;;  # Esc
+        esac
+        ;;
+      ''|$'\n') # Enter
+        printf '\033[?25h'; trap - EXIT
+        printf '\033[%dA' "$((n + 2))" 2>/dev/null
+        printf '\033[J' 2>/dev/null
+        echo "$sel"
+        return 0
+        ;;
+      k) sel=$(( (sel - 1 + n) % n )) ;;
+      j) sel=$(( (sel + 1) % n )) ;;
+      q) printf '\033[?25h'; trap - EXIT; return 1 ;;
+    esac
+  done
 }
