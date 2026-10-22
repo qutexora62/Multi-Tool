@@ -45,7 +45,7 @@ mkdir -p "$MT_HOME/modules" "$MT_HOME/lib"
 # Use GitHub API (base64) to bypass raw CDN cache; fall back to raw.
 API="https://api.github.com/repos/${REPO}/contents"
 META="${PREFIX_DIR}/tmp/.mt_meta.$$"
-FILES="multitool banner.txt lib/common.sh modules/github.sh modules/vercel.sh modules/netlify.sh modules/supabase.sh modules/telegram.sh"
+FILES="multitool lib/common.sh modules/github.sh modules/vercel.sh modules/netlify.sh modules/supabase.sh modules/telegram.sh"
 
 for f in $FILES; do
   mkdir -p "$MT_HOME/$(dirname "$f")"
