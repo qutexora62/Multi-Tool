@@ -21,7 +21,7 @@ MT_BIN="${PREFIX:-/data/data/com.termux/files/usr}/bin/multitool"
 MT_CONF="${HOME}/.config/multitool"
 
 # ---------- helpers ----------
-mt_clear() { printf '\033[H\033[2J'; }
+mt_clear() { printf '\033[H\033[2J\033[3J'; }
 
 mt_banner() {
   local bfile="$MT_HOME/banner.txt"
@@ -62,6 +62,7 @@ mt_load() {
 #  mt_menu <title> <option1> <option2> ...
 #  Arrow-key (↑/↓) + Enter selection. Echoes chosen index (0-based).
 #  Returns 1 if cancelled (q / Esc).
+#  Glitch-free: redraws whole block from a saved cursor anchor.
 # ------------------------------------------------------------
 mt_menu() {
   local title="$1"; shift
@@ -76,20 +77,25 @@ mt_menu() {
   trap 'printf "\033[?25h" >&2' EXIT
 
   while true; do
-    # render — ALL to stderr, so $(...) only captures the final index
+    # Build the whole block in one buffer (no flicker)
+    local buf=""
+    buf+="${BOLD}${WHITE}${title}${RESET}\n"
+    buf+="${DIM}-------------------------------------------------------${RESET}\n"
+    local i
+    for i in "${!opts[@]}"; do
+      if [ "$i" -eq "$sel" ]; then
+        buf+="${MAGENTA}${BOLD}  ▶ ${opts[$i]}${RESET}\n"
+      else
+        buf+="    ${DIM}${opts[$i]}${RESET}\n"
+      fi
+    done
+
     if [ "$first" -eq 0 ]; then
+      # move cursor back up to the top of the block, then redraw
       printf '\033[%dA' "$((n + 2))" >&2
     fi
     first=0
-    printf "${BOLD}${WHITE}%s${RESET}\n" "$title" >&2
-    printf "${DIM}%s${RESET}\n" "-------------------------------------------------------" >&2
-    for i in "${!opts[@]}"; do
-      if [ "$i" -eq "$sel" ]; then
-        printf "${MAGENTA}${BOLD}  ▶ %s${RESET}\n" "${opts[$i]}" >&2
-      else
-        printf "    ${DIM}%s${RESET}\n" "${opts[$i]}" >&2
-      fi
-    done
+    printf '%b' "$buf" >&2
 
     # read one key
     IFS= read -rsn1 key
@@ -104,8 +110,8 @@ mt_menu() {
         ;;
       ''|$'\n') # Enter
         printf '\033[?25h' >&2; trap - EXIT
-        printf '\033[%dA' "$((n + 2))" >&2
-        printf '\033[J' >&2
+        # clear the menu block from screen
+        printf '\033[%dA\033[J' "$((n + 2))" >&2
         echo "$sel"   # <-- ONLY this goes to stdout (captured)
         return 0
         ;;
