@@ -101,9 +101,13 @@ mt_menu() {
     local i
     for i in "${!opts[@]}"; do
       if [ "$i" -eq "$sel" ]; then
-        printf "${MAGENTA}${BOLD}  ▶ %s${RESET}\n" "${opts[$i]}" >&2
+        # selected: arrow + bright text. Keep any embedded color codes by
+        # NOT wrapping in DIM; selected gets a subtle highlight via inverse-off bold.
+        printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}%b${RESET}\n" "${opts[$i]}" >&2
       else
-        printf "    ${DIM}%s${RESET}\n" "${opts[$i]}" >&2
+        # non-selected: keep original text; do NOT force DIM so custom
+        # colors (e.g. green "Recommended") remain visible.
+        printf "    %b\n" "${opts[$i]}" >&2
       fi
     done
   }
