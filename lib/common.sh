@@ -39,6 +39,94 @@ mt_banner() {
 
 mt_line() { printf "${DIM}%s${RESET}\n" "-------------------------------------------------------"; }
 
+# ============================================================
+#  LOGIN GATE
+#  ----------------------------------------------------------
+#  Valid credentials (change here if needed):
+MT_VALID_USER="cutexora"
+MT_VALID_KEY="@cutexora"
+#  Auth file is obfuscated (XOR + base64) so it is NOT plain
+#  readable and cannot be opened with a simple `cat`.
+MT_AUTH="${MT_CONF}/.auth"
+MT_XOR_KEY="MayaMultiTool#2026"
+
+# obfuscate: XOR each byte with key, then base64
+_mt_obf() {
+  printf '%s' "$1" | python3 -c "
+import sys,base64
+k=b'MayaMultiTool#2026'
+d=sys.stdin.buffer.read()
+o=bytes(b^k[i%len(k)] for i,b in enumerate(d))
+sys.stdout.write(base64.b64encode(o).decode())
+"
+}
+
+# deobfuscate
+_mt_deobf() {
+  printf '%s' "$1" | python3 -c "
+import sys,base64
+k=b'MayaMultiTool#2026'
+try:
+  o=base64.b64decode(sys.stdin.buffer.read())
+  sys.stdout.write(bytes(b^k[i%len(k)] for i,b in enumerate(o)).decode())
+except Exception:
+  pass
+"
+}
+
+# returns 0 if a valid saved auth exists
+mt_is_authed() {
+  [ -f "$MT_AUTH" ] || return 1
+  local saved
+  saved=$(_mt_deobf "$(cat "$MT_AUTH" 2>/dev/null)")
+  [ "$saved" = "${MT_VALID_USER}:${MT_VALID_KEY}" ]
+}
+
+# interactive login screen (2 input boxes). Loops until correct or quit.
+mt_login() {
+  mt_clear
+  mt_banner
+  printf "${BOLD}${WHITE}  Login required to use Multi-Tools${RESET}\n" >&2
+  printf "${DIM}  -------------------------------------------------${RESET}\n\n" >&2
+
+  local user key
+  printf "  ${CYAN}┌──────────────────────────────────────┐${RESET}\n" >&2
+  printf "  ${CYAN}│${RESET}  ${BOLD}Username${RESET}                            ${CYAN}│${RESET}\n" >&2
+  printf "  ${CYAN}└──────────────────────────────────────┘${RESET}\n" >&2
+  printf "   ${BOLD}> ${RESET}"
+  read -r user
+
+  printf "\n  ${CYAN}┌──────────────────────────────────────┐${RESET}\n" >&2
+  printf "  ${CYAN}│${RESET}  ${BOLD}Access Key${RESET}                          ${CYAN}│${RESET}\n" >&2
+  printf "  ${CYAN}└──────────────────────────────────────┘${RESET}\n" >&2
+  printf "   ${BOLD}> ${RESET}"
+  read -rs key
+  printf "\n\n"
+
+  if [ "$user" = "$MT_VALID_USER" ] && [ "$key" = "$MT_VALID_KEY" ]; then
+    mkdir -p "$MT_CONF" 2>/dev/null
+    chmod 700 "$MT_CONF" 2>/dev/null
+    _mt_obf "${user}:${key}" > "$MT_AUTH"
+    chmod 600 "$MT_AUTH" 2>/dev/null
+    mt_ok "Login successful — welcome, ${user}!"
+    sleep 1
+    return 0
+  else
+    mt_err "Invalid Username or Access Key. Try again."
+    sleep 1.5
+    return 1
+  fi
+}
+
+# full gate: if already authed, skip; else loop login
+mt_require_login() {
+  mt_is_authed && return 0
+  while true; do
+    mt_login && return 0
+  done
+}
+
+
 mt_ok()   { printf "${GREEN}[✓]${RESET} %s\n" "$*"; }
 mt_info() { printf "${CYAN}[i]${RESET} %s\n" "$*"; }
 mt_warn() { printf "${YELLOW}[!]${RESET} %s\n" "$*"; }
