@@ -182,21 +182,115 @@ gh_jq() { python -c "import sys,json; d=json.load(sys.stdin); print($1)" 2>/dev/
 gh_list_repos() {
   gh_require_login || return
   mt_clear; mt_banner
-  printf "  ${BOLD}${WHITE}GitHub — My Repositories${RESET}\n"; mt_line
+  printf "  ${BOLD}${WHITE}GitHub — List Repository${RESET}\n"; mt_line
+  mt_info "Fetching repositories..."
+
   local resp
   resp=$(gh_api GET "/user/repos?per_page=100&sort=updated")
-  printf '%s' "$resp" | python -c "
+  # build parallel arrays: names[] and labels[] (name + visibility)
+  local -a names=() labels=()
+  while IFS=$'\t' read -r nm vis; do
+    [ -z "$nm" ] && continue
+    names+=("$nm")
+    if [ "$vis" = "true" ]; then
+      labels+=("${nm}  ${RED}🔒 Private${RESET}")
+    else
+      labels+=("${nm}  ${GREEN}🌐 Public${RESET}")
+    fi
+  done < <(printf '%s' "$resp" | python -c "
 import sys,json
 try:
     d=json.load(sys.stdin)
-    if isinstance(d,dict): print('Error:',d.get('message')); sys.exit()
+    if isinstance(d,dict):
+        sys.exit()
     for r in d:
-        vis='🔒' if r['private'] else '🌐'
-        print(f\"  {vis} {r['full_name']}  ({r.get('language') or '-'})\")
-    print(f'\n  Total: {len(d)} repos')
-except Exception as e:
-    print('Parse error:',e)
-"
+        print(r['full_name']+'\t'+('true' if r.get('private') else 'false'))
+except Exception:
+    pass
+")
+
+  if [ "${#names[@]}" -eq 0 ]; then
+    mt_warn "No repositories found."
+    mt_pause; return
+  fi
+
+  # interactive browser
+  local sel=0 n=${#names[@]} key
+  printf '\033[?25l' >&2
+  _gh_repo_restore() { printf '\033[?25h' >&2; }
+  trap '_gh_repo_restore' RETURN EXIT
+
+  _gh_repo_draw() {
+    printf '\033[H\033[J' >&2
+    printf "  ${BOLD}${WHITE}GitHub — List Repository${RESET}   ${DIM}(%d repos)${RESET}\n" "$n" >&2
+    mt_line >&2
+    local i
+    for i in "${!labels[@]}"; do
+      if [ "$i" -eq "$sel" ]; then
+        printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}%b${RESET}\n" "${labels[$i]}" >&2
+      else
+        printf "    %b\n" "${labels[$i]}" >&2
+      fi
+    done
+    printf "\n  ${DIM}↑/↓ move   Ctrl+R rename   Ctrl+D (x2) delete   q/Esc back${RESET}\n" >&2
+  }
+
+  while true; do
+    _gh_repo_draw
+    IFS= read -rsn1 key
+    case "$key" in
+      $'\x1b')
+        IFS= read -rsn2 -t 0.05 rest
+        case "$rest" in
+          '[A') sel=$(( (sel - 1 + n) % n )) ;;
+          '[B') sel=$(( (sel + 1) % n )) ;;
+          '')   _gh_repo_restore; trap - RETURN EXIT; return ;;
+        esac
+        ;;
+      $'\x12')  # Ctrl+R → rename
+        _gh_repo_restore; trap - RETURN EXIT
+        gh_rename_repo "${names[$sel]}"
+        return
+        ;;
+      $'\x04')  # Ctrl+D → delete (press twice)
+        _gh_repo_restore; trap - RETURN EXIT
+        gh_delete_repo_confirm "${names[$sel]}"
+        return
+        ;;
+      k) sel=$(( (sel - 1 + n) % n )) ;;
+      j) sel=$(( (sel + 1) % n )) ;;
+      q) _gh_repo_restore; trap - RETURN EXIT; return ;;
+    esac
+  done
+}
+
+# ---------- rename a repo ----------
+gh_rename_repo() {
+  local repo="$1"
+  mt_clear; mt_banner
+  printf "  ${BOLD}${WHITE}GitHub — Rename Repository${RESET}\n"; mt_line
+  printf "  Repo: ${CYAN}%s${RESET}\n" "$repo"
+  printf "  New name: "; read -r newname
+  [ -z "$newname" ] && { mt_warn "Cancelled."; mt_pause; return; }
+  local resp
+  resp=$(gh_api PATCH "/repos/$repo" "{\"name\":\"$newname\"}")
+  local url; url=$(printf '%s' "$resp" | gh_jq "d.get('full_name','')")
+  if [ -n "$url" ]; then mt_ok "Renamed → $url"; else mt_err "Failed: $(printf '%s' "$resp" | gh_jq "d.get('message','')")"; fi
+  mt_pause
+}
+
+# ---------- delete a repo (must press Ctrl+D twice) ----------
+gh_delete_repo_confirm() {
+  local repo="$1"
+  mt_clear; mt_banner
+  printf "  ${BOLD}${WHITE}GitHub — Delete Repository${RESET}\n"; mt_line
+  printf "  ${RED}Press Ctrl+D again to confirm delete of:${RESET} ${BOLD}%s${RESET}\n" "$repo"
+  printf "  ${DIM}(any other key cancels)${RESET}\n"
+  local k; IFS= read -rsn1 k
+  if [ "$k" != $'\x04' ]; then mt_warn "Cancelled."; mt_pause; return; fi
+  local resp
+  resp=$(gh_api DELETE "/repos/$repo" "")
+  if [ -z "$resp" ]; then mt_ok "Deleted: $repo"; else mt_err "Failed: $(printf '%s' "$resp" | gh_jq "d.get('message','')")"; fi
   mt_pause
 }
 
@@ -213,20 +307,6 @@ gh_create_repo() {
   resp=$(gh_api POST "/user/repos" "{\"name\":\"$name\",\"description\":\"$desc\",\"private\":$p}")
   local url; url=$(printf '%s' "$resp" | gh_jq "d.get('html_url','')")
   if [ -n "$url" ]; then mt_ok "Created: $url"; else mt_err "Failed: $(printf '%s' "$resp" | gh_jq "d.get('message','')")"; fi
-  mt_pause
-}
-
-gh_delete_repo() {
-  gh_require_login || return
-  mt_clear; mt_banner
-  printf "  ${BOLD}${WHITE}GitHub — Delete Repository${RESET}\n"; mt_line
-  printf "  Repo (owner/name): "; read -r repo
-  [ -z "$repo" ] && { mt_err "Cancelled."; mt_pause; return; }
-  printf "  ${RED}Confirm delete %s? (yes/N):${RESET} " "$repo"; read -r c
-  [ "$c" != "yes" ] && { mt_warn "Cancelled."; mt_pause; return; }
-  local resp
-  resp=$(gh_api DELETE "/repos/$repo" "")
-  if [ -z "$resp" ]; then mt_ok "Deleted: $repo"; else mt_err "Failed: $(printf '%s' "$resp" | gh_jq "d.get('message','')")"; fi
   mt_pause
 }
 
@@ -271,11 +351,10 @@ github_main() {
     local -a items=()
     if [ -n "$token" ]; then
       # logged in → repo actions only (no Auth/PAT)
-      items+=("${CYAN}List My Repositories${RESET}")
+      items+=("${CYAN}List Repository${RESET}")
       items+=("${CYAN}Create Repository${RESET}")
       items+=("${CYAN}Clone Repository${RESET}")
-      items+=("${RED}Delete Repository${RESET}")
-      items+=("Logout")
+      items+=("LogOut")
       items+=("Back")
     else
       # not logged in → ONLY Auth and PAT
@@ -291,9 +370,8 @@ github_main() {
         0) gh_list_repos ;;
         1) gh_create_repo ;;
         2) gh_git_clone ;;
-        3) gh_delete_repo ;;
-        4) gh_logout ;;
-        5) return ;;
+        3) gh_logout ;;
+        4) return ;;
       esac
     else
       case "$choice" in
