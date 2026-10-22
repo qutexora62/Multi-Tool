@@ -25,14 +25,14 @@ MT_CONF="${HOME}/.config/multitool"
 mt_clear() { printf '\033[H\033[2J'; }
 
 mt_banner() {
-  # Fixed, stable banner. No ASCII art (which breaks on zoom / narrow
-  # terminals). Uses a bordered box so it looks clean at any width.
+  # Fixed, stable banner — plain ASCII border so it never breaks on
+  # zoom, narrow terminals, or unfonted box-drawing glyphs.
   printf '\n' >&2
   printf "${CYAN}${BOLD}" >&2
-  printf '  ╔══════════════════════════════════════╗\n' >&2
-  printf '  ║          M U L T I - T O O L S        ║\n' >&2
-  printf '  ║              Dr. @cutexora            ║\n' >&2
-  printf '  ╚══════════════════════════════════════╝\n' >&2
+  printf '  +======================================+\n' >&2
+  printf '  |          M U L T I - T O O L S        |\n' >&2
+  printf '  |              Dr. @cutexora            |\n' >&2
+  printf '  +======================================+\n' >&2
   printf "${RESET}" >&2
   printf "${DIM}        -------------------------------------------------${RESET}\n\n" >&2
 }
