@@ -17,6 +17,8 @@ MT_BIN="${PREFIX_DIR}/bin/multitool"
 C='\033[1;36m'; G='\033[1;32m'; Y='\033[1;33m'; R='\033[1;31m'; N='\033[0m'
 
 # ---- animated progress bar (single line, 0 -> 100) ----
+# Draws the WHOLE line each frame: "[✓] Label  [====...] 100%"
+# Uses \r + \033[K so the line is redrawn in place -> never scrolls.
 _anim() {
   local label="$1"
   local i width=30 filled empty bar
@@ -25,11 +27,10 @@ _anim() {
     empty=$(( width - filled ))
     bar=""
     [ "$filled" -gt 0 ] && bar=$(printf '%*s' "$filled" '' | sed 's/ /=/g')
-    printf "\r\033[K      ${C}%s${N} [${G}%s${N}%*s] ${Y}%3d%%${N}" \
+    printf "\r\033[K${G}[✓]${N} %-10s [${G}%s${N}%*s] ${Y}%3d%%${N}" \
       "$label" "$bar" "$empty" "" "$i"
     sleep 0.012
   done
-  printf "\n"
 }
 
 # ---- checks ----
@@ -77,8 +78,9 @@ for idx in "${!FILES[@]}"; do
   if [ "$ok" -eq 0 ]; then
     echo -e "${R}[✗] Failed to download: ${label}${N}"; exit 1
   fi
-  echo -e "${G}[✓]${N} ${label}"
+  # animate the whole "[✓] Label [bar] 100%" on ONE in-place line
   _anim "$label"
+  printf "\n"
 done
 rm -f "$META"
 
