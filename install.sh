@@ -73,7 +73,6 @@ rm -f "$META"
 chmod 755 "$MT_HOME/multitool"
 chmod 755 "$MT_HOME/lib/common.sh"
 chmod 755 "$MT_HOME/modules/"*.sh
-chmod 444 "$MT_HOME/banner.txt"
 # lock source files (read+execute only, no write)
 chmod 555 "$MT_HOME/multitool" "$MT_HOME/lib/common.sh" "$MT_HOME/modules/"*.sh
 
