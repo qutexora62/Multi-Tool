@@ -16,18 +16,17 @@ MT_BIN="${PREFIX_DIR}/bin/multitool"
 
 C='\033[1;36m'; G='\033[1;32m'; Y='\033[1;33m'; R='\033[1;31m'; N='\033[0m'
 
-# ---- animated progress bar (0 -> 100) ----
+# ---- animated progress bar (single line, 0 -> 100) ----
 _anim() {
   local label="$1"
-  local i
-  local width=30
+  local i width=30 filled empty bar
   for i in $(seq 0 100); do
-    local filled=$(( i * width / 100 ))
-    local empty=$(( width - filled ))
-    printf "\r      ${C}%s${N} [" "$label"
-    printf "${G}%${filled}s${N}" "" | tr ' ' '='
-    printf "%${empty}s" "" | tr ' ' ' '
-    printf "] ${Y}%3d%%${N}" "$i"
+    filled=$(( i * width / 100 ))
+    empty=$(( width - filled ))
+    bar=""
+    [ "$filled" -gt 0 ] && bar=$(printf '%*s' "$filled" '' | sed 's/ /=/g')
+    printf "\r\033[K      ${C}%s${N} [${G}%s${N}%*s] ${Y}%3d%%${N}" \
+      "$label" "$bar" "$empty" "" "$i"
     sleep 0.012
   done
   printf "\n"
