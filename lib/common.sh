@@ -65,21 +65,26 @@ mt_load() {
 # ============================================================
 #  mt_menu <title> <option1> <option2> ...
 #  ----------------------------------------------------------
-#  Glitch-free approach using the TERMINAL SCREEN buffer.
-#
-#  On entry we switch to the alternate screen, so the menu has
-#  its own clean canvas. Every frame we:
-#     * move cursor to home  (\033[H)
-#     * clear to end of screen (\033[J)
-#     * draw the whole block
-#  This NEVER depends on line counting -> no repeated titles,
-#  no overlap, no scroll glitches.
+#  Glitch-free menu using the alternate screen buffer.
+#  The BANNER is drawn INSIDE the alt-screen (below), so it is
+#  always visible together with the menu — never wiped out.
 #
 #  Output protocol:
 #    - all drawing  -> STDERR  (visible to user)
 #    - selected idx -> STDOUT  (captured by caller via $(...))
 #  Returns 1 if cancelled (q / Esc).
 # ============================================================
+_mt_banner_lines() {
+  # plain ASCII banner, safe everywhere
+  printf "${CYAN}${BOLD}" >&2
+  printf '  +======================================+\n' >&2
+  printf '  |          M U L T I - T O O L S        |\n' >&2
+  printf '  |              Dr. @cutexora            |\n' >&2
+  printf '  +======================================+\n' >&2
+  printf "${RESET}" >&2
+  printf "${DIM}        -------------------------------------------------${RESET}\n\n" >&2
+}
+
 mt_menu() {
   local title="$1"; shift
   local -a opts=("$@")
@@ -97,19 +102,16 @@ mt_menu() {
   trap '_mt_menu_restore' RETURN EXIT
 
   _mt_draw() {
-    # home + clear
+    # home + clear, then banner + menu
     printf '\033[H\033[J' >&2
+    _mt_banner_lines
     printf "${BOLD}${WHITE}%s${RESET}\n" "$title" >&2
     printf "${DIM}%s${RESET}\n" "-------------------------------------------------------" >&2
     local i
     for i in "${!opts[@]}"; do
       if [ "$i" -eq "$sel" ]; then
-        # selected: arrow + bright text. Keep any embedded color codes by
-        # NOT wrapping in DIM; selected gets a subtle highlight via inverse-off bold.
         printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}%b${RESET}\n" "${opts[$i]}" >&2
       else
-        # non-selected: keep original text; do NOT force DIM so custom
-        # colors (e.g. green "Recommended") remain visible.
         printf "    %b\n" "${opts[$i]}" >&2
       fi
     done
@@ -118,13 +120,12 @@ mt_menu() {
   while true; do
     _mt_draw
     IFS= read -rsn1 key
-    local redraw=0
     case "$key" in
       $'\x1b')
         IFS= read -rsn2 -t 0.05 rest
         case "$rest" in
-          '[A') sel=$(( (sel - 1 + n) % n )); redraw=1 ;;  # up
-          '[B') sel=$(( (sel + 1) % n )); redraw=1 ;;      # down
+          '[A') sel=$(( (sel - 1 + n) % n )) ;;  # up
+          '[B') sel=$(( (sel + 1) % n )) ;;      # down
           '')   _mt_menu_restore; trap - RETURN EXIT; return 1 ;;  # Esc
         esac
         ;;
@@ -133,10 +134,9 @@ mt_menu() {
         echo "$sel"
         return 0
         ;;
-      k) sel=$(( (sel - 1 + n) % n )); redraw=1 ;;
-      j) sel=$(( (sel + 1) % n )); redraw=1 ;;
+      k) sel=$(( (sel - 1 + n) % n )) ;;
+      j) sel=$(( (sel + 1) % n )) ;;
       q) _mt_menu_restore; trap - RETURN EXIT; return 1 ;;
     esac
-    # loop redraws on next iteration
   done
 }
