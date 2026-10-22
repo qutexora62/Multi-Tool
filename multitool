@@ -12,6 +12,9 @@ MT_HOME="${PREFIX:-/data/data/com.termux/files/usr}/lib/multitool"
 source "$MT_HOME/lib/common.sh"
 
 main_loop() {
+  # login gate — must authenticate before using the tool
+  mt_require_login || exit 1
+
   while true; do
     mt_clear
     mt_banner
