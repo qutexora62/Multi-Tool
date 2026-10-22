@@ -140,7 +140,7 @@ gh_oauth() {
 # ============================================================
 gh_pat() {
   mt_clear; mt_banner
-  printf "  ${BOLD}${WHITE}GitHub — Personal Access Token${RESET} ${GREEN}${BOLD}(Recommended)${RESET}\n"
+  printf "  ${BOLD}${WHITE}GitHub — Personal Access Token${RESET}\n"
   mt_line
   mt_info "Opening the token creation page..."
   gh_open_url "https://github.com/settings/tokens/new?scopes=repo,user,delete_repo,workflow,admin:org,admin:public_key,gist&description=MultiTool"
@@ -268,11 +268,11 @@ github_main() {
     printf "  ${BOLD}${WHITE}GitHub${RESET}   %b\n" "$status"
     mt_line
 
-    # Build menu. Actions are shown only when logged in.
     local -a items=()
     if [ -n "$token" ]; then
+      # logged in → full menu
       items+=("${GREEN}Authentication (OAuth)${RESET}")
-      items+=("${GREEN}Personal Access Token${RESET} ${GREEN}${BOLD}(Recommended)${RESET}")
+      items+=("${GREEN}Personal Access Token${RESET}")
       items+=("${CYAN}List My Repositories${RESET}")
       items+=("${CYAN}Create Repository${RESET}")
       items+=("${CYAN}Clone Repository${RESET}")
@@ -280,29 +280,31 @@ github_main() {
       items+=("Logout")
       items+=("Back")
     else
+      # not logged in → ONLY Auth and PAT
       items+=("${GREEN}Authentication (OAuth)${RESET}")
-      items+=("${GREEN}Personal Access Token${RESET} ${GREEN}${BOLD}(Recommended)${RESET}")
-      items+=("${DIM}List My Repositories  (login required)${RESET}")
-      items+=("${DIM}Create Repository  (login required)${RESET}")
-      items+=("${DIM}Clone Repository  (login required)${RESET}")
-      items+=("${DIM}Delete Repository  (login required)${RESET}")
-      items+=("${DIM}Logout${RESET}")
-      items+=("Back")
+      items+=("${GREEN}Personal Access Token${RESET}")
     fi
 
     local choice
     choice=$(mt_menu "GitHub — choose action:" "${items[@]}") || return
 
-    case "$choice" in
-      0) gh_oauth ;;
-      1) gh_pat ;;
-      2) gh_list_repos ;;
-      3) gh_create_repo ;;
-      4) gh_git_clone ;;
-      5) gh_delete_repo ;;
-      6) gh_logout ;;
-      7) return ;;
-    esac
+    if [ -n "$token" ]; then
+      case "$choice" in
+        0) gh_oauth ;;
+        1) gh_pat ;;
+        2) gh_list_repos ;;
+        3) gh_create_repo ;;
+        4) gh_git_clone ;;
+        5) gh_delete_repo ;;
+        6) gh_logout ;;
+        7) return ;;
+      esac
+    else
+      case "$choice" in
+        0) gh_oauth ;;
+        1) gh_pat ;;
+      esac
+    fi
   done
 }
 
