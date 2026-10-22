@@ -21,7 +21,7 @@ MT_BIN="${PREFIX:-/data/data/com.termux/files/usr}/bin/multitool"
 MT_CONF="${HOME}/.config/multitool"
 
 # ---------- helpers ----------
-mt_clear() { clear 2>/dev/null || printf '\033[2J\033[H'; }
+mt_clear() { printf '\033[H\033[2J'; }
 
 mt_banner() {
   local bfile="$MT_HOME/banner.txt"
