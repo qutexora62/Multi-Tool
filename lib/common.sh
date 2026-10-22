@@ -69,6 +69,7 @@ mt_menu() {
   local n=${#opts[@]}
   local sel=0
   local key
+  local first=1
 
   # hide cursor
   printf '\033[?25l'
@@ -77,7 +78,10 @@ mt_menu() {
 
   while true; do
     # render
-    printf '\033[%dA' "$((n + 2))" 2>/dev/null
+    if [ "$first" -eq 0 ]; then
+      printf '\033[%dA' "$((n + 2))" 2>/dev/null
+    fi
+    first=0
     printf "${BOLD}${WHITE}%s${RESET}\n" "$title"
     printf "${DIM}%s${RESET}\n" "-------------------------------------------------------"
     for i in "${!opts[@]}"; do
