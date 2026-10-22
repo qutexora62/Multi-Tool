@@ -44,8 +44,11 @@ fi
 
 command -v curl >/dev/null 2>&1 || { echo -e "${Y}[i] Installing curl...${N}"; pkg install -y curl >/dev/null 2>&1; }
 
+# friendly display path (do not show the real internal path)
+DISPLAY_HOME="/cutexora/termux/lib/multitool"
+
 echo ""
-echo -e "${C}[i]${N} Installing to: ${MT_HOME}"
+echo -e "${C}[i]${N} Installing to: ${DISPLAY_HOME}"
 
 # ---- clean old install ----
 if [ -d "$MT_HOME" ]; then
