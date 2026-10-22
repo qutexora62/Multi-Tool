@@ -18,16 +18,35 @@ curl -s -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/qu
 multitool
 ```
 
-## Menu
+## Preview
 
 ```
-1) GitHub
-2) Vercel
-3) Netlify
-4) Supabase
-5) Telegram
-0) Exit
+  +======================================+
+  |          M U L T I - T O O L S        |
+  |              Dr. @cutexora            |
+  +======================================+
+        -------------------------------------------------
+Select a service:
+-------------------------------------------------------
+  ▶ GitHub
+    Vercel
+    Netlify
+    Supabase
+    Telegram
+    Exit
 ```
+
+Use **↑ / ↓** to move and **Enter** to select. Press **q** or **Esc** to cancel.
+
+## Features
+
+| Service  | What you can do |
+|----------|-----------------|
+| GitHub   | Authentication (OAuth) · Personal Access Token · List / Create / Clone / Delete repositories |
+| Vercel   | coming soon |
+| Netlify  | coming soon |
+| Supabase | coming soon |
+| Telegram | coming soon |
 
 ## Uninstall
 
