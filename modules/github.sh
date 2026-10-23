@@ -286,11 +286,18 @@ except Exception:
     IFS= read -rsn1 key
     case "$key" in
       $'\x1b')
-        IFS= read -rsn2 -t 0.05 rest
-        case "$rest" in
-          '[A') sel=$(( (sel - 1 + n) % n )); del_armed=-1 ;;
-          '[B') sel=$(( (sel + 1) % n )); del_armed=-1 ;;
-          '')   _gh_repo_restore; trap - RETURN EXIT; return ;;
+        IFS= read -rsn1 -t 0.15 k2
+        if [ -z "$k2" ]; then
+          _gh_repo_restore; trap - RETURN EXIT; return
+        fi
+        case "$k2" in
+          '[')
+            IFS= read -rsn1 -t 0.15 k3
+            case "$k3" in
+              'A') sel=$(( (sel - 1 + n) % n )); del_armed=-1 ;;
+              'B') sel=$(( (sel + 1) % n )); del_armed=-1 ;;
+            esac
+            ;;
         esac
         ;;
       $'\x12')  # Ctrl+R → start inline rename
@@ -645,7 +652,7 @@ gh_file_manager() {
           fi
           ;;
         $'\x1b')
-          IFS= read -rsn2 -t 0.05 rest
+          IFS= read -rsn1 -t 0.15 _junk
           renaming=0
           ;;
         $'\x7f'|$'\b') edit_buf="${edit_buf%?}" ;;
@@ -657,10 +664,16 @@ gh_file_manager() {
     IFS= read -rsn1 key
     case "$key" in
       $'\x1b')
-        IFS= read -rsn1 -t 0.05 k2
+        # Esc vs Alt+key vs arrow sequence — read next byte with longer timeout
+        IFS= read -rsn1 -t 0.15 k2
         if [ -z "$k2" ]; then
+          # plain Esc → one step back
           if [ -n "$curpath" ]; then
-            curpath="${curpath%/*}"
+            if [ "${curpath#*/}" = "$curpath" ]; then
+              curpath=""
+            else
+              curpath="${curpath%/*}"
+            fi
             _gh_fm_load
           else
             _gh_fm_restore; trap - RETURN EXIT; return
@@ -679,7 +692,8 @@ gh_file_manager() {
             _gh_fm_load
             ;;
           '[')
-            IFS= read -rsn1 -t 0.05 k3
+            # arrow / special key: third byte
+            IFS= read -rsn1 -t 0.15 k3
             case "$k3" in
               'A') sel=$(( (sel - 1 + n) % n )); del_armed=-1 ;;
               'B') sel=$(( (sel + 1) % n )); del_armed=-1 ;;
