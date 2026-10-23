@@ -187,10 +187,11 @@ gh_list_repos() {
 
   local resp
   resp=$(gh_api GET "/user/repos?per_page=100&sort=updated")
-  local -a names=()
-  while IFS= read -r nm; do
+  local -a names=() vis=()
+  while IFS=$'\t' read -r nm v; do
     [ -z "$nm" ] && continue
     names+=("$nm")
+    vis+=("$v")
   done < <(printf '%s' "$resp" | python -c "
 import sys,json
 try:
@@ -198,7 +199,7 @@ try:
     if isinstance(d,dict):
         sys.exit()
     for r in d:
-        print(r['full_name'])
+        print(r['full_name']+'\t'+('private' if r.get('private') else 'public'))
 except Exception:
     pass
 ")
@@ -223,16 +224,22 @@ except Exception:
     mt_line >&2
     local i
     for i in "${!names[@]}"; do
+      local vtag
+      if [ "${vis[$i]}" = "private" ]; then
+        vtag="${RED}🔒 Private${RESET}"
+      else
+        vtag="${GREEN}🌐 Public${RESET}"
+      fi
       if [ "$renaming" -eq 1 ] && [ "$i" -eq "$sel" ]; then
         # inline editable input
-        printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}${WHITE}[ %s${RESET}${DIM}_${RESET}${BOLD} ]${RESET}\n" "$edit_buf" >&2
+        printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}${WHITE}[ %s${RESET}${DIM}_${RESET}${BOLD} ]${RESET}  %b\n" "$edit_buf" "$vtag" >&2
       elif [ "$i" -eq "$del_armed" ]; then
         # armed for delete → red
         printf "  ${MAGENTA}${BOLD}▶${RESET} ${RED}${BOLD}%s${RESET}  ${RED}(Ctrl+D again to delete)${RESET}\n" "${names[$i]}" >&2
       elif [ "$i" -eq "$sel" ]; then
-        printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}%s${RESET}\n" "${names[$i]}" >&2
+        printf "  ${MAGENTA}${BOLD}▶${RESET} ${BOLD}%s${RESET}  %b\n" "${names[$i]}" "$vtag" >&2
       else
-        printf "    %s\n" "${names[$i]}" >&2
+        printf "    %s  %b\n" "${names[$i]}" "$vtag" >&2
       fi
     done
     if [ "$renaming" -eq 1 ]; then
@@ -295,13 +302,17 @@ except Exception:
           local resp3
           resp3=$(gh_api DELETE "/repos/$repo" "")
           if [ -z "$resp3" ]; then
-            # remove from list
-            local -a tmp=()
+            # remove from list (names + vis)
+            local -a tmp=() tmpv=()
             local i
             for i in "${!names[@]}"; do
-              [ "$i" -ne "$sel" ] && tmp+=("${names[$i]}")
+              if [ "$i" -ne "$sel" ]; then
+                tmp+=("${names[$i]}")
+                tmpv+=("${vis[$i]}")
+              fi
             done
             names=("${tmp[@]}")
+            vis=("${tmpv[@]}")
             n=${#names[@]}
             del_armed=-1
             [ "$n" -eq 0 ] && { _gh_repo_restore; trap - RETURN EXIT; return; }
