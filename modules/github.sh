@@ -187,10 +187,11 @@ gh_list_repos() {
 
   local resp
   resp=$(gh_api GET "/user/repos?per_page=100&sort=updated")
-  local -a names=() vis=()
-  while IFS=$'\t' read -r nm v; do
+  local -a names=() fulls=() vis=()
+  while IFS=$'\t' read -r nm full v; do
     [ -z "$nm" ] && continue
     names+=("$nm")
+    fulls+=("$full")
     vis+=("$v")
   done < <(printf '%s' "$resp" | python -c "
 import sys,json
@@ -199,7 +200,7 @@ try:
     if isinstance(d,dict):
         sys.exit()
     for r in d:
-        print(r['full_name']+'\t'+('private' if r.get('private') else 'public'))
+        print(r['name']+'\t'+r['full_name']+'\t'+('private' if r.get('private') else 'public'))
 except Exception:
     pass
 ")
@@ -259,12 +260,14 @@ except Exception:
         ''|$'\n')  # Enter → save
           renaming=0
           if [ -n "$edit_buf" ] && [ "$edit_buf" != "${names[$sel]}" ]; then
-            local repo="${names[$sel]}"
+            local repo="${fulls[$sel]}"
             local resp2
             resp2=$(gh_api PATCH "/repos/$repo" "{\"name\":\"$edit_buf\"}")
             local newfull; newfull=$(printf '%s' "$resp2" | gh_jq "d.get('full_name','')")
+            local newname; newname=$(printf '%s' "$resp2" | gh_jq "d.get('name','')")
             if [ -n "$newfull" ]; then
-              names[$sel]="$newfull"
+              names[$sel]="$newname"
+              fulls[$sel]="$newfull"
             fi
           fi
           ;;
@@ -298,20 +301,22 @@ except Exception:
         ;;
       $'\x04')  # Ctrl+D → arm (red); second Ctrl+D deletes
         if [ "$del_armed" -eq "$sel" ]; then
-          local repo="${names[$sel]}"
+          local repo="${fulls[$sel]}"
           local resp3
           resp3=$(gh_api DELETE "/repos/$repo" "")
           if [ -z "$resp3" ]; then
-            # remove from list (names + vis)
-            local -a tmp=() tmpv=()
+            # remove from list (names + fulls + vis)
+            local -a tmp=() tmpf=() tmpv=()
             local i
             for i in "${!names[@]}"; do
               if [ "$i" -ne "$sel" ]; then
                 tmp+=("${names[$i]}")
+                tmpf+=("${fulls[$i]}")
                 tmpv+=("${vis[$i]}")
               fi
             done
             names=("${tmp[@]}")
+            fulls=("${tmpf[@]}")
             vis=("${tmpv[@]}")
             n=${#names[@]}
             del_armed=-1
