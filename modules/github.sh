@@ -299,6 +299,11 @@ except Exception:
         edit_buf="${names[$sel]}"
         del_armed=-1
         ;;
+      ''|$'\n')  # Enter → open repo file manager
+        _gh_repo_restore; trap - RETURN EXIT
+        gh_file_manager "${fulls[$sel]}"
+        return
+        ;;
       $'\x04')  # Ctrl+D → arm (red); second Ctrl+D deletes
         if [ "$del_armed" -eq "$sel" ]; then
           local repo="${fulls[$sel]}"
@@ -437,7 +442,7 @@ github_main() {
     local -a items=()
     if [ -n "$token" ]; then
       # logged in → repo actions only (no Auth/PAT)
-      items+=("${CYAN}List Repository${RESET}")
+      items+=("${CYAN}List Repositories${RESET}")
       items+=("${CYAN}Create Repository${RESET}")
       items+=("${CYAN}Clone Repository${RESET}")
       items+=("${CYAN}Push Repository${RESET}")
@@ -468,6 +473,298 @@ github_main() {
       esac
     fi
   done
+}
+
+# ============================================================
+#  REPO FILE MANAGER
+#  Browse folders/files, edit with nano, rename/delete/create/replace
+# ============================================================
+
+_gh_default_branch() {
+  local repo="$1"
+  gh_api GET "/repos/$repo" | gh_jq "d.get('default_branch','main')"
+}
+
+_gh_list_path() {
+  local repo="$1" branch="$2" path="$3"
+  local url="/repos/$repo/contents"
+  [ -n "$path" ] && url="${url}/${path}"
+  local resp
+  resp=$(gh_api GET "${url}?ref=${branch}")
+  printf '%s' "$resp" | python -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    if isinstance(d,dict):
+        sys.exit()
+    dirs=[]; files=[]
+    for e in d:
+        if e['type']=='dir': dirs.append(e)
+        else: files.append(e)
+    for e in dirs+files:
+        print(e['type']+'\t'+e['name']+'\t'+e['path'])
+except Exception:
+    pass
+"
+}
+
+_gh_fetch_file() {
+  local repo="$1" path="$2" out="$3"
+  local resp
+  resp=$(gh_api GET "/repos/$repo/contents/${path}")
+  printf '%s' "$resp" | python -c "
+import sys,json,base64
+try:
+    d=json.load(sys.stdin)
+    open('$out','wb').write(base64.b64decode(d['content']))
+except Exception:
+    sys.exit(1)
+"
+}
+
+_gh_commit_file() {
+  local repo="$1" path="$2" localfile="$3" msg="$4"
+  local sha
+  sha=$(gh_api GET "/repos/$repo/contents/${path}" | gh_jq "d.get('sha','')")
+  local content; content=$(base64 -w0 "$localfile")
+  local body
+  if [ -n "$sha" ]; then
+    body="{\"message\":\"$msg\",\"content\":\"$content\",\"sha\":\"$sha\"}"
+  else
+    body="{\"message\":\"$msg\",\"content\":\"$content\"}"
+  fi
+  gh_api PUT "/repos/$repo/contents/${path}" "$body" | gh_jq "d.get('commit',{}).get('sha','')"
+}
+
+_gh_delete_file() {
+  local repo="$1" path="$2" msg="$3"
+  local sha
+  sha=$(gh_api GET "/repos/$repo/contents/${path}" | gh_jq "d.get('sha','')")
+  [ -z "$sha" ] && return 1
+  gh_api DELETE "/repos/$repo/contents/${path}" "{\"message\":\"$msg\",\"sha\":\"$sha\"}" >/dev/null
+  return 0
+}
+
+_gh_create_file() {
+  local repo="$1" path="$2" msg="$3"
+  local tmp; tmp=$(mktemp "${PREFIX:-/data/data/com.termux/files/usr}/tmp/ghc.XXXXXX")
+  : > "$tmp"
+  _gh_commit_file "$repo" "$path" "$tmp" "$msg" >/dev/null
+  rm -f "$tmp"
+}
+
+gh_file_manager() {
+  local repo="$1"
+  local branch; branch=$(_gh_default_branch "$repo")
+  local curpath=""
+
+  local -a etype=() ename=() epath=()
+  local sel=0 n=0 key
+  local del_armed=-1
+  local renaming=0 edit_buf=""
+
+  printf '\033[?25l' >&2
+  _gh_fm_restore() { printf '\033[?25h' >&2; }
+  trap '_gh_fm_restore' RETURN EXIT
+
+  _gh_fm_load() {
+    etype=(); ename=(); epath=()
+    while IFS=$'\t' read -r t nm p; do
+      [ -z "$nm" ] && continue
+      etype+=("$t"); ename+=("$nm"); epath+=("$p")
+    done < <(_gh_list_path "$repo" "$branch" "$curpath")
+    n=${#ename[@]}
+    sel=0; del_armed=-1; renaming=0
+  }
+
+  _gh_fm_draw() {
+    printf '\033[H\033[J' >&2
+    printf "  ${BOLD}${WHITE}%s${RESET}  ${DIM}/%s${RESET}   ${DIM}(%d)${RESET}\n" "$repo" "$curpath" "$n" >&2
+    mt_line >&2
+    if [ "$n" -eq 0 ]; then
+      printf "  ${DIM}(empty folder)${RESET}\n" >&2
+    fi
+    local i
+    for i in "${!ename[@]}"; do
+      local icon
+      if [ "${etype[$i]}" = "dir" ]; then icon="${CYAN}📁${RESET}"; else icon="${DIM}📄${RESET}"; fi
+      if [ "$renaming" -eq 1 ] && [ "$i" -eq "$sel" ]; then
+        printf "  ${MAGENTA}${BOLD}▶${RESET} %b ${BOLD}${WHITE}[ %s${RESET}${DIM}_${RESET}${BOLD} ]${RESET}\n" "$icon" "$edit_buf" >&2
+      elif [ "$i" -eq "$del_armed" ]; then
+        printf "  ${MAGENTA}${BOLD}▶${RESET} %b ${RED}${BOLD}%s${RESET}  ${RED}(Ctrl+D again)${RESET}\n" "$icon" "${ename[$i]}" >&2
+      elif [ "$i" -eq "$sel" ]; then
+        printf "  ${MAGENTA}${BOLD}▶${RESET} %b ${BOLD}%s${RESET}\n" "$icon" "${ename[$i]}" >&2
+      else
+        printf "    %b %s\n" "$icon" "${ename[$i]}" >&2
+      fi
+    done
+    if [ "$renaming" -eq 1 ]; then
+      printf "\n  ${DIM}type new name · Enter save · Esc cancel${RESET}\n" >&2
+    else
+      printf "\n  ${DIM}↑/↓ move  Enter open/edit  Ctrl+R rename  Ctrl+D(x2) del${RESET}\n" >&2
+      printf "  ${DIM}Alt+R replace  Alt+C new folder  Ctrl+F new file  q back${RESET}\n" >&2
+    fi
+  }
+
+  _gh_fm_load
+
+  while true; do
+    _gh_fm_draw
+
+    if [ "$renaming" -eq 1 ]; then
+      IFS= read -rsn1 key
+      case "$key" in
+        ''|$'\n')
+          renaming=0
+          if [ -n "$edit_buf" ] && [ "$edit_buf" != "${ename[$sel]}" ]; then
+            local oldp="${epath[$sel]}"
+            local newp
+            if [ -n "$curpath" ]; then newp="${curpath}/${edit_buf}"; else newp="$edit_buf"; fi
+            if [ "${etype[$sel]}" = "dir" ]; then
+              mt_warn "Folder rename not supported via API — skipping."
+            else
+              local t; t=$(mktemp "${PREFIX:-/data/data/com.termux/files/usr}/tmp/ghr.XXXXXX")
+              if _gh_fetch_file "$repo" "$oldp" "$t"; then
+                _gh_commit_file "$repo" "$newp" "$t" "rename: $oldp -> $newp" >/dev/null
+                _gh_delete_file "$repo" "$oldp" "rename: remove old $oldp" >/dev/null
+              fi
+              rm -f "$t"
+            fi
+            _gh_fm_load
+          fi
+          ;;
+        $'\x1b')
+          IFS= read -rsn2 -t 0.05 rest
+          renaming=0
+          ;;
+        $'\x7f'|$'\b') edit_buf="${edit_buf%?}" ;;
+        *) edit_buf+="$key" ;;
+      esac
+      continue
+    fi
+
+    IFS= read -rsn1 key
+    case "$key" in
+      $'\x1b')
+        IFS= read -rsn1 -t 0.05 k2
+        if [ -z "$k2" ]; then
+          if [ -n "$curpath" ]; then
+            curpath="${curpath%/*}"
+            _gh_fm_load
+          else
+            _gh_fm_restore; trap - RETURN EXIT; return
+          fi
+          continue
+        fi
+        case "$k2" in
+          'r'|'R')
+            _gh_fm_restore; trap - RETURN EXIT
+            _gh_fm_replace "$repo" "$curpath" "${epath[$sel]:-}"
+            _gh_fm_load
+            ;;
+          'c'|'C')
+            _gh_fm_restore; trap - RETURN EXIT
+            _gh_fm_newfolder "$repo" "$curpath"
+            _gh_fm_load
+            ;;
+          '[')
+            IFS= read -rsn1 -t 0.05 k3
+            case "$k3" in
+              'A') sel=$(( (sel - 1 + n) % n )); del_armed=-1 ;;
+              'B') sel=$(( (sel + 1) % n )); del_armed=-1 ;;
+            esac
+            ;;
+        esac
+        ;;
+      ''|$'\n')
+        [ "$n" -eq 0 ] && continue
+        if [ "${etype[$sel]}" = "dir" ]; then
+          curpath="${epath[$sel]}"
+          _gh_fm_load
+        else
+          _gh_fm_restore; trap - RETURN EXIT
+          _gh_fm_edit "$repo" "${epath[$sel]}"
+          _gh_fm_load
+        fi
+        ;;
+      $'\x12')
+        renaming=1; edit_buf="${ename[$sel]}"; del_armed=-1
+        ;;
+      $'\x04')
+        [ "$n" -eq 0 ] && continue
+        if [ "$del_armed" -eq "$sel" ]; then
+          if [ "${etype[$sel]}" = "dir" ]; then
+            mt_warn "Folder delete not supported via API — skipping."
+          else
+            _gh_fm_restore; trap - RETURN EXIT
+            _gh_delete_file "$repo" "${epath[$sel]}" "delete ${epath[$sel]}" && mt_ok "Deleted: ${ename[$sel]}" || mt_err "Delete failed."
+            sleep 0.7
+          fi
+          _gh_fm_load
+        else
+          del_armed=$sel
+        fi
+        ;;
+      $'\x06')
+        _gh_fm_restore; trap - RETURN EXIT
+        _gh_fm_newfile "$repo" "$curpath"
+        _gh_fm_load
+        ;;
+      k) sel=$(( (sel - 1 + n) % n )); del_armed=-1 ;;
+      j) sel=$(( (sel + 1) % n )); del_armed=-1 ;;
+      q) _gh_fm_restore; trap - RETURN EXIT; return ;;
+    esac
+  done
+}
+
+_gh_fm_edit() {
+  local repo="$1" path="$2"
+  local tmp; tmp=$(mktemp "${PREFIX:-/data/data/com.termux/files/usr}/tmp/ghe.XXXXXX")
+  if ! _gh_fetch_file "$repo" "$path" "$tmp"; then
+    mt_err "Could not fetch file."
+    mt_pause; rm -f "$tmp"; return
+  fi
+  local before; before=$(md5sum "$tmp" | awk '{print $1}')
+  nano "$tmp"
+  local after; after=$(md5sum "$tmp" | awk '{print $1}')
+  if [ "$before" = "$after" ]; then
+    mt_info "No changes."
+    sleep 0.7; rm -f "$tmp"; return
+  fi
+  local sha
+  sha=$(_gh_commit_file "$repo" "$path" "$tmp" "edit: $path")
+  if [ -n "$sha" ]; then mt_ok "Committed: $path"; else mt_err "Commit failed."; fi
+  sleep 0.8
+  rm -f "$tmp"
+}
+
+_gh_fm_newfile() {
+  local repo="$1" curpath="$2"
+  printf "  New file name: "; read -r fname
+  [ -z "$fname" ] && return
+  local p; if [ -n "$curpath" ]; then p="${curpath}/${fname}"; else p="$fname"; fi
+  if _gh_create_file "$repo" "$p" "create: $p"; then mt_ok "Created: $p"; else mt_err "Create failed."; fi
+  sleep 0.8
+}
+
+_gh_fm_newfolder() {
+  local repo="$1" curpath="$2"
+  printf "  New folder name: "; read -r dname
+  [ -z "$dname" ] && return
+  local p; if [ -n "$curpath" ]; then p="${curpath}/${dname}/.gitkeep"; else p="${dname}/.gitkeep"; fi
+  if _gh_create_file "$repo" "$p" "create folder: ${p%/.gitkeep}"; then mt_ok "Created folder: $dname"; else mt_err "Create failed."; fi
+  sleep 0.8
+}
+
+_gh_fm_replace() {
+  local repo="$1" curpath="$2" target="$3"
+  [ -z "$target" ] && { mt_warn "Select a file first."; mt_pause; return; }
+  printf "  Local file to upload: "; read -r lf
+  [ -f "$lf" ] || { mt_err "File not found."; mt_pause; return; }
+  local sha
+  sha=$(_gh_commit_file "$repo" "$target" "$lf" "replace: $target")
+  if [ -n "$sha" ]; then mt_ok "Replaced: $target"; else mt_err "Replace failed."; fi
+  mt_pause
 }
 
 github_main
