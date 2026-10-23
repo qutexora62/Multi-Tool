@@ -200,7 +200,7 @@ try:
     if isinstance(d,dict):
         sys.exit()
     for r in d:
-        print(r['name']+'\t'+r['full_name']+'\t'+('private' if r.get('private') else 'public'))
+        print(r['full_name']+'\t'+r['full_name']+'\t'+('private' if r.get('private') else 'public'))
 except Exception:
     pass
 ")
@@ -264,9 +264,8 @@ except Exception:
             local resp2
             resp2=$(gh_api PATCH "/repos/$repo" "{\"name\":\"$edit_buf\"}")
             local newfull; newfull=$(printf '%s' "$resp2" | gh_jq "d.get('full_name','')")
-            local newname; newname=$(printf '%s' "$resp2" | gh_jq "d.get('name','')")
             if [ -n "$newfull" ]; then
-              names[$sel]="$newname"
+              names[$sel]="$newfull"
               fulls[$sel]="$newfull"
             fi
           fi
@@ -579,30 +578,42 @@ gh_file_manager() {
 
   _gh_fm_draw() {
     printf '\033[H\033[J' >&2
-    printf "  ${BOLD}${WHITE}%s${RESET}  ${DIM}/%s${RESET}   ${DIM}(%d)${RESET}\n" "$repo" "$curpath" "$n" >&2
+    # ---- header ----
+    printf "  ${BOLD}${MAGENTA}REPO${RESET}  ${BOLD}${WHITE}%s${RESET}\n" "$repo" >&2
+    if [ -n "$curpath" ]; then
+      printf "  ${BOLD}${CYAN}PATH${RESET}  ${WHITE}/%s${RESET}  ${DIM}(%d items)${RESET}\n" "$curpath" "$n" >&2
+    else
+      printf "  ${BOLD}${CYAN}PATH${RESET}  ${WHITE}/${RESET}  ${DIM}(%d items)${RESET}\n" "$n" >&2
+    fi
     mt_line >&2
+
+    # ---- body ----
     if [ "$n" -eq 0 ]; then
-      printf "  ${DIM}(empty folder)${RESET}\n" >&2
+      printf "\n  ${DIM}(empty folder)${RESET}\n" >&2
     fi
     local i
     for i in "${!ename[@]}"; do
       local icon
       if [ "${etype[$i]}" = "dir" ]; then icon="${CYAN}📁${RESET}"; else icon="${DIM}📄${RESET}"; fi
       if [ "$renaming" -eq 1 ] && [ "$i" -eq "$sel" ]; then
-        printf "  ${MAGENTA}${BOLD}▶${RESET} %b ${BOLD}${WHITE}[ %s${RESET}${DIM}_${RESET}${BOLD} ]${RESET}\n" "$icon" "$edit_buf" >&2
+        printf "  ${MAGENTA}${BOLD}▶${RESET} %b  ${BOLD}${WHITE}[ %s${RESET}${DIM}_${RESET}${BOLD} ]${RESET}\n" "$icon" "$edit_buf" >&2
       elif [ "$i" -eq "$del_armed" ]; then
-        printf "  ${MAGENTA}${BOLD}▶${RESET} %b ${RED}${BOLD}%s${RESET}  ${RED}(Ctrl+D again)${RESET}\n" "$icon" "${ename[$i]}" >&2
+        printf "  ${MAGENTA}${BOLD}▶${RESET} %b  ${RED}${BOLD}%s${RESET}  ${RED}← Ctrl+D again to delete${RESET}\n" "$icon" "${ename[$i]}" >&2
       elif [ "$i" -eq "$sel" ]; then
-        printf "  ${MAGENTA}${BOLD}▶${RESET} %b ${BOLD}%s${RESET}\n" "$icon" "${ename[$i]}" >&2
+        printf "  ${MAGENTA}${BOLD}▶${RESET} %b  ${BOLD}${WHITE}%s${RESET}\n" "$icon" "${ename[$i]}" >&2
       else
-        printf "    %b %s\n" "$icon" "${ename[$i]}" >&2
+        printf "    %b  %s\n" "$icon" "${ename[$i]}" >&2
       fi
     done
+
+    # ---- footer ----
+    printf "\n" >&2
+    mt_line >&2
     if [ "$renaming" -eq 1 ]; then
-      printf "\n  ${DIM}type new name · Enter save · Esc cancel${RESET}\n" >&2
+      printf "  ${DIM}type new name${RESET}   ${BOLD}Enter${RESET}${DIM} save${RESET}   ${BOLD}Esc${RESET}${DIM} cancel${RESET}\n" >&2
     else
-      printf "\n  ${DIM}↑/↓ move  Enter open/edit  Ctrl+R rename  Ctrl+D(x2) del${RESET}\n" >&2
-      printf "  ${DIM}Alt+R replace  Alt+C new folder  Ctrl+F new file  q back${RESET}\n" >&2
+      printf "  ${BOLD}↑/↓${RESET}${DIM} move${RESET}      ${BOLD}Enter${RESET}${DIM} open/edit${RESET}   ${BOLD}Esc${RESET}${DIM} up/back${RESET}    ${BOLD}q${RESET}${DIM} exit${RESET}\n" >&2
+      printf "  ${BOLD}Ctrl+R${RESET}${DIM} rename${RESET}   ${BOLD}Ctrl+D${RESET}${DIM} delete(x2)${RESET}   ${BOLD}Ctrl+F${RESET}${DIM} new file${RESET}   ${BOLD}Alt+F${RESET}${DIM} new folder${RESET}   ${BOLD}Alt+R${RESET}${DIM} replace${RESET}\n" >&2
     fi
   }
 
@@ -662,7 +673,7 @@ gh_file_manager() {
             _gh_fm_replace "$repo" "$curpath" "${epath[$sel]:-}"
             _gh_fm_load
             ;;
-          'c'|'C')
+          'f'|'F')
             _gh_fm_restore; trap - RETURN EXIT
             _gh_fm_newfolder "$repo" "$curpath"
             _gh_fm_load
